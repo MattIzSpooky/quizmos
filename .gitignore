@@ -1,0 +1,13 @@
+# Go build output
+backend/bin/
+
+# Node dependencies (frontend/ and tools/ each have their own package.json)
+node_modules/
+
+# Derived intermediate for the AsyncAPI -> quicktype codegen step; regenerated
+# by `make generate-asyncapi`, never hand-edited or committed.
+api/asyncapi/generated-schemas/
+
+# Local env overrides
+.env
+.env.local

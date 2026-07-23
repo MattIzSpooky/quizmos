@@ -1,0 +1,63 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+
+	"github.com/mattizspooky/quizmos/backend/internal/api"
+	"github.com/mattizspooky/quizmos/backend/internal/service"
+)
+
+func (h *Handlers) JoinGame(ctx context.Context, req api.JoinGameRequestObject) (api.JoinGameResponseObject, error) {
+	result, err := h.svc.JoinGame(ctx, req.Body.Code, req.Params.XClientId, req.Body.Nickname)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return api.JoinGame404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "no game with that code"))}, nil
+		case errors.Is(err, service.ErrConflict):
+			return api.JoinGame409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(apiError("conflict", "game has already ended"))}, nil
+		}
+		return nil, err
+	}
+	return api.JoinGame200JSONResponse{
+		GameId:   result.Game.ID,
+		Code:     result.Game.Code,
+		Status:   api.GameStatus(result.Game.Status),
+		Nickname: result.Player.Nickname,
+	}, nil
+}
+
+func (h *Handlers) GetPublicGame(ctx context.Context, req api.GetPublicGameRequestObject) (api.GetPublicGameResponseObject, error) {
+	game, err := h.svc.GetPublicGame(ctx, req.Code)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			return api.GetPublicGame404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "no game with that code"))}, nil
+		}
+		return nil, err
+	}
+	return api.GetPublicGame200JSONResponse{
+		Code:        game.Code,
+		QuizTitle:   game.QuizTitle,
+		Status:      api.GameStatus(game.Status),
+		PlayerCount: game.PlayerCount,
+	}, nil
+}
+
+func (h *Handlers) GetPublicLeaderboard(ctx context.Context, req api.GetPublicLeaderboardRequestObject) (api.GetPublicLeaderboardResponseObject, error) {
+	game, err := h.svc.GetPublicGame(ctx, req.Code)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			return api.GetPublicLeaderboard404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "no game with that code"))}, nil
+		}
+		return nil, err
+	}
+	gameRow, err := h.svc.GetGameByCode(ctx, game.Code)
+	if err != nil {
+		return nil, err
+	}
+	leaderboard, err := h.svc.Leaderboard(ctx, gameRow.ID)
+	if err != nil {
+		return nil, err
+	}
+	return api.GetPublicLeaderboard200JSONResponse(leaderboardToAPI(leaderboard)), nil
+}

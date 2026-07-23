@@ -1,0 +1,867 @@
+openapi: 3.0.3
+info:
+  title: Quizmos API
+  description: REST API for the Quizmos trivia/pub-quiz application.
+  version: 0.1.0
+
+servers:
+  - url: /api
+
+security: []
+
+tags:
+  - name: quizzes
+  - name: questions
+  - name: games
+  - name: players
+
+paths:
+  /admin/quizzes:
+    post:
+      operationId: createQuiz
+      tags: [quizzes]
+      summary: Create a quiz
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQuizRequest"
+      responses:
+        "201":
+          description: Quiz created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quiz"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      operationId: listQuizzes
+      tags: [quizzes]
+      summary: List quizzes
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Quizzes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Quiz"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/quizzes/{quizId}:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+    get:
+      operationId: getQuiz
+      tags: [quizzes]
+      summary: Get a quiz with its questions
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Quiz
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateQuiz
+      tags: [quizzes]
+      summary: Update a quiz
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQuizRequest"
+      responses:
+        "200":
+          description: Updated quiz
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Quiz"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteQuiz
+      tags: [quizzes]
+      summary: Delete a quiz
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/quizzes/{quizId}/questions:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+    post:
+      operationId: createQuestion
+      tags: [questions]
+      summary: Add a question to a quiz
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQuestionRequest"
+      responses:
+        "201":
+          description: Question created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      operationId: listQuestions
+      tags: [questions]
+      summary: List a quiz's questions, in order
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Question"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/quizzes/{quizId}/questions/order:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+    put:
+      operationId: reorderQuestions
+      tags: [questions]
+      summary: Reorder a quiz's questions
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderQuestionsRequest"
+      responses:
+        "200":
+          description: Questions in new order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Question"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/quizzes/{quizId}/questions/{questionId}:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+      - $ref: "#/components/parameters/QuestionId"
+    get:
+      operationId: getQuestion
+      tags: [questions]
+      summary: Get a question
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateQuestion
+      tags: [questions]
+      summary: Update a question
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQuestionRequest"
+      responses:
+        "200":
+          description: Updated question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteQuestion
+      tags: [questions]
+      summary: Delete a question
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/games:
+    post:
+      operationId: createGame
+      tags: [games]
+      summary: Create a game session from a quiz
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGameRequest"
+      responses:
+        "201":
+          description: Game created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGame"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      operationId: listGames
+      tags: [games]
+      summary: List game sessions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/GameStatus"
+      responses:
+        "200":
+          description: Games
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminGame"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/games/{gameId}:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    get:
+      operationId: getGame
+      tags: [games]
+      summary: Get full game detail (admin view, includes correct answers)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Game detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGameDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/games/{gameId}/start:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    post:
+      operationId: startGame
+      tags: [games]
+      summary: Start a game (lobby -> in_progress)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Game started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGame"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /admin/games/{gameId}/next-question:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    post:
+      operationId: advanceGame
+      tags: [games]
+      summary: End the current question and advance to the next one, or end the game if exhausted
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Game advanced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGame"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /admin/games/{gameId}/end:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    post:
+      operationId: endGame
+      tags: [games]
+      summary: Force-end a game
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Game ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGame"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/games/{gameId}/leaderboard:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    get:
+      operationId: getAdminLeaderboard
+      tags: [games]
+      summary: Leaderboard snapshot for the admin dashboard
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Leaderboard"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /games/join:
+    post:
+      operationId: joinGame
+      tags: [players]
+      summary: Join a game by its join code
+      parameters:
+        - $ref: "#/components/parameters/ClientId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinGameRequest"
+      responses:
+        "200":
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinGameResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /games/{code}:
+    get:
+      operationId: getPublicGame
+      tags: [players]
+      summary: Public lookup of a game by join code
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Game summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicGame"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /games/{code}/leaderboard:
+    get:
+      operationId: getPublicLeaderboard
+      tags: [players]
+      summary: Public leaderboard snapshot
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/OptionalClientId"
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Leaderboard"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Keycloak-issued access token; caller must hold the `quiz-admin` realm role.
+
+  parameters:
+    QuizId:
+      name: quizId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    QuestionId:
+      name: questionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GameId:
+      name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ClientId:
+      name: X-Client-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OptionalClientId:
+      name: X-Client-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Valid token but missing the required role
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Conflicts with current resource state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    QuestionType:
+      type: string
+      enum: [multiple_choice]
+
+    GameStatus:
+      type: string
+      enum: [lobby, in_progress, ended]
+
+    Quiz:
+      type: object
+      required: [id, title, questionCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        questionCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    QuizDetail:
+      allOf:
+        - $ref: "#/components/schemas/Quiz"
+        - type: object
+          required: [questions]
+          properties:
+            questions:
+              type: array
+              items:
+                $ref: "#/components/schemas/Question"
+
+    CreateQuizRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+
+    UpdateQuizRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+
+    QuestionOption:
+      type: object
+      required: [id, text]
+      properties:
+        id:
+          type: string
+          format: uuid
+        text:
+          type: string
+
+    QuestionOptionWithAnswer:
+      allOf:
+        - $ref: "#/components/schemas/QuestionOption"
+        - type: object
+          required: [isCorrect]
+          properties:
+            isCorrect:
+              type: boolean
+
+    Question:
+      type: object
+      required: [id, quizId, type, prompt, position, timeLimitSeconds, points, options]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quizId:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/QuestionType"
+        prompt:
+          type: string
+        position:
+          type: integer
+        timeLimitSeconds:
+          type: integer
+        points:
+          type: integer
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionOptionWithAnswer"
+
+    CreateQuestionOption:
+      type: object
+      required: [text, isCorrect]
+      properties:
+        text:
+          type: string
+          minLength: 1
+        isCorrect:
+          type: boolean
+
+    CreateQuestionRequest:
+      type: object
+      required: [type, prompt, options]
+      properties:
+        type:
+          $ref: "#/components/schemas/QuestionType"
+        prompt:
+          type: string
+          minLength: 1
+        timeLimitSeconds:
+          type: integer
+          default: 30
+        points:
+          type: integer
+          default: 1000
+        options:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/CreateQuestionOption"
+
+    UpdateQuestionRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+        timeLimitSeconds:
+          type: integer
+        points:
+          type: integer
+        options:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/CreateQuestionOption"
+
+    ReorderQuestionsRequest:
+      type: object
+      required: [questionIds]
+      properties:
+        questionIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    CreateGameRequest:
+      type: object
+      required: [quizId]
+      properties:
+        quizId:
+          type: string
+          format: uuid
+
+    AdminGame:
+      type: object
+      required: [id, quizId, quizTitle, code, status, currentQuestionIndex, totalQuestions, playerCount, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        quizId:
+          type: string
+          format: uuid
+        quizTitle:
+          type: string
+        code:
+          type: string
+        status:
+          $ref: "#/components/schemas/GameStatus"
+        currentQuestionIndex:
+          type: integer
+          nullable: true
+        totalQuestions:
+          type: integer
+        playerCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    AdminPlayer:
+      type: object
+      required: [clientId, nickname, score, connected]
+      properties:
+        clientId:
+          type: string
+          format: uuid
+        nickname:
+          type: string
+        score:
+          type: integer
+        connected:
+          type: boolean
+
+    AdminGameDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminGame"
+        - type: object
+          required: [players]
+          properties:
+            players:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminPlayer"
+
+    JoinGameRequest:
+      type: object
+      required: [code, nickname]
+      properties:
+        code:
+          type: string
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 32
+
+    JoinGameResponse:
+      type: object
+      required: [gameId, code, status, nickname]
+      properties:
+        gameId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        status:
+          $ref: "#/components/schemas/GameStatus"
+        nickname:
+          type: string
+
+    PublicGame:
+      type: object
+      required: [code, quizTitle, status, playerCount]
+      properties:
+        code:
+          type: string
+        quizTitle:
+          type: string
+        status:
+          $ref: "#/components/schemas/GameStatus"
+        playerCount:
+          type: integer
+
+    LeaderboardEntry:
+      type: object
+      required: [clientId, nickname, score, rank]
+      properties:
+        clientId:
+          type: string
+          format: uuid
+        nickname:
+          type: string
+        score:
+          type: integer
+        rank:
+          type: integer
+
+    Leaderboard:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"

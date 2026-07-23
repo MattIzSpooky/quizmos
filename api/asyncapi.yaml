@@ -1,0 +1,299 @@
+asyncapi: 3.0.0
+info:
+  title: Quizmos Websocket API
+  version: 0.1.0
+  description: >
+    Live gameplay channel. Connect to /ws/games/{code}?client_id={uuid} after
+    joining via POST /api/games/join. Only the message payload schemas under
+    components.schemas are used for code generation (via quicktype); the
+    {type, payload} envelope itself is hand-written on both client and server.
+
+defaultContentType: application/json
+
+channels:
+  gameSession:
+    address: /ws/games/{code}
+    parameters:
+      code:
+        description: Game join code
+    messages:
+      presencePlayerJoined:
+        $ref: "#/components/messages/presencePlayerJoined"
+      presencePlayerLeft:
+        $ref: "#/components/messages/presencePlayerLeft"
+      gameStarted:
+        $ref: "#/components/messages/gameStarted"
+      questionStarted:
+        $ref: "#/components/messages/questionStarted"
+      questionEnded:
+        $ref: "#/components/messages/questionEnded"
+      answerResult:
+        $ref: "#/components/messages/answerResult"
+      leaderboardUpdated:
+        $ref: "#/components/messages/leaderboardUpdated"
+      gameEnded:
+        $ref: "#/components/messages/gameEnded"
+      errorMessage:
+        $ref: "#/components/messages/errorMessage"
+      answerSubmit:
+        $ref: "#/components/messages/answerSubmit"
+
+operations:
+  receivePresencePlayerJoined:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/presencePlayerJoined"
+  receivePresencePlayerLeft:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/presencePlayerLeft"
+  receiveGameStarted:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/gameStarted"
+  receiveQuestionStarted:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/questionStarted"
+  receiveQuestionEnded:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/questionEnded"
+  receiveAnswerResult:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/answerResult"
+  receiveLeaderboardUpdated:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/leaderboardUpdated"
+  receiveGameEnded:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/gameEnded"
+  receiveError:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/errorMessage"
+  sendAnswerSubmit:
+    action: send
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/answerSubmit"
+
+components:
+  messages:
+    presencePlayerJoined:
+      name: presence.playerJoined
+      payload:
+        $ref: "#/components/schemas/PresencePlayerJoined"
+    presencePlayerLeft:
+      name: presence.playerLeft
+      payload:
+        $ref: "#/components/schemas/PresencePlayerLeft"
+    gameStarted:
+      name: game.started
+      payload:
+        $ref: "#/components/schemas/GameStarted"
+    questionStarted:
+      name: question.started
+      payload:
+        $ref: "#/components/schemas/QuestionStarted"
+    questionEnded:
+      name: question.ended
+      payload:
+        $ref: "#/components/schemas/QuestionEnded"
+    answerResult:
+      name: answer.result
+      payload:
+        $ref: "#/components/schemas/AnswerResult"
+    leaderboardUpdated:
+      name: leaderboard.updated
+      payload:
+        $ref: "#/components/schemas/LeaderboardUpdated"
+    gameEnded:
+      name: game.ended
+      payload:
+        $ref: "#/components/schemas/GameEnded"
+    errorMessage:
+      name: error
+      payload:
+        $ref: "#/components/schemas/ErrorPayload"
+    answerSubmit:
+      name: answer.submit
+      payload:
+        $ref: "#/components/schemas/AnswerSubmit"
+
+  schemas:
+    PlayerSummary:
+      type: object
+      required: [clientId, nickname]
+      properties:
+        clientId:
+          type: string
+        nickname:
+          type: string
+
+    PresencePlayerJoined:
+      type: object
+      required: [player, playerCount]
+      properties:
+        player:
+          $ref: "#/components/schemas/PlayerSummary"
+        playerCount:
+          type: integer
+
+    PresencePlayerLeft:
+      type: object
+      required: [clientId, playerCount]
+      properties:
+        clientId:
+          type: string
+        playerCount:
+          type: integer
+
+    GameStarted:
+      type: object
+      required: [startedAt]
+      properties:
+        startedAt:
+          type: string
+          format: date-time
+
+    QuestionOption:
+      type: object
+      required: [id, text]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+
+    QuestionStarted:
+      type: object
+      required: [questionIndex, questionId, prompt, options, timeLimitSeconds, totalQuestions]
+      properties:
+        questionIndex:
+          type: integer
+        questionId:
+          type: string
+        prompt:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionOption"
+        timeLimitSeconds:
+          type: integer
+        totalQuestions:
+          type: integer
+
+    AnswerCount:
+      type: object
+      required: [optionId, count]
+      properties:
+        optionId:
+          type: string
+        count:
+          type: integer
+
+    QuestionEnded:
+      type: object
+      required: [questionIndex, questionId, correctOptionId, answerCounts]
+      properties:
+        questionIndex:
+          type: integer
+        questionId:
+          type: string
+        correctOptionId:
+          type: string
+        answerCounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnswerCount"
+
+    AnswerResult:
+      type: object
+      required: [questionId, correct, pointsAwarded, totalScore]
+      properties:
+        questionId:
+          type: string
+        correct:
+          type: boolean
+        pointsAwarded:
+          type: integer
+        totalScore:
+          type: integer
+
+    LeaderboardEntry:
+      type: object
+      required: [clientId, nickname, score, rank]
+      properties:
+        clientId:
+          type: string
+        nickname:
+          type: string
+        score:
+          type: integer
+        rank:
+          type: integer
+
+    LeaderboardUpdated:
+      type: object
+      required: [questionIndex, entries]
+      properties:
+        questionIndex:
+          type: integer
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+
+    GameEnded:
+      type: object
+      required: [finalLeaderboard, endedAt]
+      properties:
+        finalLeaderboard:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+        endedAt:
+          type: string
+          format: date-time
+
+    ErrorPayload:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    AnswerSubmit:
+      type: object
+      required: [questionId, optionId]
+      properties:
+        questionId:
+          type: string
+        optionId:
+          type: string

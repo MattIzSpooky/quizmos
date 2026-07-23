@@ -1,0 +1,15 @@
+{
+  "name": "quizmos-tools",
+  "private": true,
+  "type": "module",
+  "description": "Codegen helper scripts, invoked from the root Makefile.",
+  "scripts": {
+    "extract-asyncapi-schemas": "node extract-asyncapi-schemas.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "quicktype": "^23.0.171"
+  }
+}
