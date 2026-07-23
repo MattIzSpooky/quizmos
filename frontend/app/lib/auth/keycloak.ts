@@ -49,7 +49,29 @@ export async function getAccessToken(): Promise<string | null> {
   return user.access_token;
 }
 
+/**
+ * Decodes realm_access.roles from the *access token*, not `user.profile`
+ * (the ID token's claims): Keycloak's built-in "realm roles" mapper only
+ * puts realm_access on the access token by default, so reading it from
+ * the ID token silently sees no roles at all and every login looks
+ * unauthorized — checking the access token is what actually matches what
+ * the backend validates on each API call anyway.
+ */
 export function isAdmin(user: User | null): boolean {
-  const roles = (user?.profile?.realm_access as { roles?: string[] } | undefined)?.roles ?? [];
+  if (!user?.access_token) return false;
+  const roles = decodeAccessTokenRoles(user.access_token);
   return roles.includes("quiz-admin");
+}
+
+function decodeAccessTokenRoles(accessToken: string): string[] {
+  try {
+    const payload = accessToken.split(".")[1];
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const json = atob(padded);
+    const claims = JSON.parse(json) as { realm_access?: { roles?: string[] } };
+    return claims.realm_access?.roles ?? [];
+  } catch {
+    return [];
+  }
 }

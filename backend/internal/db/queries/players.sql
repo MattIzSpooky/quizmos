@@ -7,6 +7,9 @@ RETURNING *;
 -- name: GetPlayer :one
 SELECT * FROM players WHERE game_id = $1 AND client_id = $2;
 
+-- name: DeletePlayer :execrows
+DELETE FROM players WHERE game_id = $1 AND client_id = $2;
+
 -- name: ListPlayersByGame :many
 SELECT * FROM players WHERE game_id = $1 ORDER BY joined_at ASC;
 

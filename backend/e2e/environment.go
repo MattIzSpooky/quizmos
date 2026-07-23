@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -61,14 +62,19 @@ func repoRoot() string {
 
 func startEnvironment(ctx context.Context) (*environment, error) {
 	root := repoRoot()
-	migrationSQL := filepath.Join(root, "backend", "internal", "db", "migrations", "000001_init.up.sql")
+	migrationsDir := filepath.Join(root, "backend", "internal", "db", "migrations")
+	migrationFiles, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
+	if err != nil {
+		return nil, fmt.Errorf("glob migration files: %w", err)
+	}
+	sort.Strings(migrationFiles) // apply in numeric-prefix order, same as golang-migrate
 	realmExport := filepath.Join(root, "deploy", "keycloak", "realm-export.json")
 
 	pgC, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("quizmos"),
 		tcpostgres.WithUsername("quizmos"),
 		tcpostgres.WithPassword("quizmos-dev"),
-		tcpostgres.WithInitScripts(migrationSQL),
+		tcpostgres.WithInitScripts(migrationFiles...),
 		tcpostgres.BasicWaitStrategies(),
 	)
 	if err != nil {

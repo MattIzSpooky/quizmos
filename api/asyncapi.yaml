@@ -21,12 +21,16 @@ channels:
         $ref: "#/components/messages/presencePlayerJoined"
       presencePlayerLeft:
         $ref: "#/components/messages/presencePlayerLeft"
+      playerKicked:
+        $ref: "#/components/messages/playerKicked"
       gameStarted:
         $ref: "#/components/messages/gameStarted"
       questionStarted:
         $ref: "#/components/messages/questionStarted"
       questionEnded:
         $ref: "#/components/messages/questionEnded"
+      questionReviewed:
+        $ref: "#/components/messages/questionReviewed"
       answerResult:
         $ref: "#/components/messages/answerResult"
       leaderboardUpdated:
@@ -51,6 +55,12 @@ operations:
       $ref: "#/channels/gameSession"
     messages:
       - $ref: "#/channels/gameSession/messages/presencePlayerLeft"
+  receivePlayerKicked:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/playerKicked"
   receiveGameStarted:
     action: receive
     channel:
@@ -69,6 +79,12 @@ operations:
       $ref: "#/channels/gameSession"
     messages:
       - $ref: "#/channels/gameSession/messages/questionEnded"
+  receiveQuestionReviewed:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/questionReviewed"
   receiveAnswerResult:
     action: receive
     channel:
@@ -110,6 +126,10 @@ components:
       name: presence.playerLeft
       payload:
         $ref: "#/components/schemas/PresencePlayerLeft"
+    playerKicked:
+      name: player.kicked
+      payload:
+        $ref: "#/components/schemas/PlayerKicked"
     gameStarted:
       name: game.started
       payload:
@@ -122,6 +142,10 @@ components:
       name: question.ended
       payload:
         $ref: "#/components/schemas/QuestionEnded"
+    questionReviewed:
+      name: question.reviewed
+      payload:
+        $ref: "#/components/schemas/QuestionReviewed"
     answerResult:
       name: answer.result
       payload:
@@ -171,6 +195,16 @@ components:
         playerCount:
           type: integer
 
+    PlayerKicked:
+      type: object
+      required: [reason]
+      description: >
+        Unicast to the removed player only; the rest of the room instead
+        sees the normal presence.playerLeft once the connection drops.
+      properties:
+        reason:
+          type: string
+
     GameStarted:
       type: object
       required: [startedAt]
@@ -190,7 +224,7 @@ components:
 
     QuestionStarted:
       type: object
-      required: [questionIndex, questionId, prompt, options, timeLimitSeconds, totalQuestions]
+      required: [questionIndex, questionId, prompt, options, timed, timeLimitSeconds, totalQuestions]
       properties:
         questionIndex:
           type: integer
@@ -202,6 +236,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuestionOption"
+        timed:
+          type: boolean
+          description: Whether the client should show a countdown for this question.
         timeLimitSeconds:
           type: integer
         totalQuestions:
@@ -230,6 +267,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AnswerCount"
+
+    QuestionReviewed:
+      type: object
+      required: [questionIndex, questionId, prompt, options, correctOptionId, answerCounts, totalQuestions]
+      description: >
+        A read-only recap of a previous question, sent when the admin goes
+        back. Unlike question.started, the correct answer is already known
+        (it was already revealed), and clients must not offer a way to
+        answer it.
+      properties:
+        questionIndex:
+          type: integer
+        questionId:
+          type: string
+        prompt:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionOption"
+        correctOptionId:
+          type: string
+        answerCounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnswerCount"
+        totalQuestions:
+          type: integer
 
     AnswerResult:
       type: object

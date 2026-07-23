@@ -16,6 +16,13 @@ func int4Param(v *int) pgtype.Int4 {
 	return pgtype.Int4{Int32: int32(*v), Valid: true}
 }
 
+func boolParam(v *bool) pgtype.Bool {
+	if v == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *v, Valid: true}
+}
+
 // IntFromInt4 converts a possibly-null Postgres int4 to *int, for mapping
 // db rows into API response types.
 func IntFromInt4(v pgtype.Int4) *int {

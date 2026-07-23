@@ -4,6 +4,8 @@ import type { Route } from "./+types/admin.quizzes.$quizId";
 import { adminApi } from "../lib/api/client";
 import { useRequireAdmin } from "../lib/auth/useRequireAdmin";
 import type { components } from "../lib/api/schema.gen";
+import { AdminHeader } from "../components/AdminHeader";
+import { Button, Field, Panel, StarToggle, Toggle } from "../components/ui";
 
 type QuizDetail = components["schemas"]["QuizDetail"];
 
@@ -69,78 +71,104 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
     if (data) navigate(`/admin/games/${data.id}`);
   }
 
+  async function setTimed(timed: boolean) {
+    setQuiz((prev) => (prev ? { ...prev, timed } : prev));
+    await adminApi.PATCH("/admin/quizzes/{quizId}", { params: { path: { quizId } }, body: { timed } });
+  }
+
   if (!ready || !quiz) return null;
 
   return (
-    <main className="max-w-2xl mx-auto p-6 flex flex-col gap-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{quiz.title}</h1>
-        <button
-          onClick={startGame}
-          disabled={quiz.questions.length === 0}
-          className="bg-black text-white rounded px-4 py-2 disabled:opacity-50"
-        >
+    <main className="relative z-0 mx-auto max-w-2xl px-4 py-8 sm:py-12">
+      <AdminHeader back={{ to: "/admin/quizzes", label: "All quizzes" }} />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="truncate font-display text-2xl font-semibold text-paper">{quiz.title}</h1>
+        <Button onClick={startGame} disabled={quiz.questions.length === 0} className="shrink-0">
           Start a new game
-        </button>
+        </Button>
       </div>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="font-semibold">Questions</h2>
-        {quiz.questions.length === 0 && <p className="text-gray-500">No questions yet.</p>}
-        <ul className="flex flex-col gap-2">
+      <Panel className="mt-6 p-5">
+        <Toggle
+          checked={quiz.timed}
+          onChange={setTimed}
+          label="Timed questions"
+          description="Off for a slower, no-pressure pace — no countdown shown to players."
+        />
+      </Panel>
+
+      <section className="mt-8 flex flex-col gap-3">
+        <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-dim">Questions</h2>
+        {quiz.questions.length === 0 && (
+          <p className="text-sm text-dim">No questions yet — add one below.</p>
+        )}
+        <ul className="flex flex-col gap-3">
           {quiz.questions.map((q) => (
-            <li key={q.id} className="border rounded px-4 py-3">
-              <div className="flex items-center justify-between">
-                <p className="font-medium">{q.prompt}</p>
-                <button onClick={() => deleteQuestion(q.id)} className="text-sm text-red-600">
-                  Delete
-                </button>
-              </div>
-              <ul className="text-sm text-gray-600 mt-1">
-                {q.options.map((o) => (
-                  <li key={o.id}>
-                    {o.isCorrect ? "✓" : "·"} {o.text}
-                  </li>
-                ))}
-              </ul>
+            <li key={q.id}>
+              <Panel className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-medium text-paper">{q.prompt}</p>
+                  <button
+                    onClick={() => deleteQuestion(q.id)}
+                    className="shrink-0 font-mono text-xs text-flare/80 underline decoration-flare/30 underline-offset-4 hover:text-flare"
+                  >
+                    Delete
+                  </button>
+                </div>
+                <ul className="mt-2 flex flex-col gap-1">
+                  {q.options.map((o) => (
+                    <li
+                      key={o.id}
+                      className={`flex items-center gap-2 text-sm ${o.isCorrect ? "text-starlight" : "text-dim"}`}
+                    >
+                      <span aria-hidden="true">{o.isCorrect ? "★" : "☆"}</span>
+                      {o.text}
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
             </li>
           ))}
         </ul>
       </section>
 
-      <section className="flex flex-col gap-3 border-t pt-6">
-        <h2 className="font-semibold">Add a question</h2>
-        <form onSubmit={addQuestion} className="flex flex-col gap-3">
-          <input
-            className="border rounded px-3 py-2"
-            placeholder="Question prompt"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-          {options.map((opt, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="correct"
-                checked={opt.isCorrect}
-                onChange={() => setCorrect(i)}
-                title="Correct answer"
-              />
-              <input
-                className="border rounded px-3 py-2 flex-1"
-                placeholder={`Option ${i + 1}`}
-                value={opt.text}
-                onChange={(e) => updateOptionText(i, e.target.value)}
-              />
+      <section className="mt-8">
+        <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-dim">
+          Add a question
+        </h2>
+        <Panel className="p-5">
+          <form onSubmit={addQuestion} className="flex flex-col gap-4">
+            <Field
+              label="Prompt"
+              placeholder="What's the question?"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+                Options — mark the correct one
+              </span>
+              {options.map((opt, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <StarToggle checked={opt.isCorrect} onChange={() => setCorrect(i)} label={`Option ${i + 1} is correct`} />
+                  <input
+                    className="flex-1 rounded-lg border border-void-3 bg-void px-4 py-2.5 text-paper placeholder-dim/60 outline-none transition focus:border-aurora"
+                    placeholder={`Option ${i + 1}`}
+                    value={opt.text}
+                    onChange={(e) => updateOptionText(i, e.target.value)}
+                  />
+                </div>
+              ))}
             </div>
-          ))}
-          <div className="flex gap-2">
-            <button type="button" onClick={addOption} className="border rounded px-3 py-1 text-sm">
-              + Add option
-            </button>
-            <button className="bg-black text-white rounded px-4 py-2">Add question</button>
-          </div>
-        </form>
+            <div className="flex flex-wrap gap-3">
+              <Button type="button" variant="ghost" onClick={addOption}>
+                + Add option
+              </Button>
+              <Button type="submit">Add question</Button>
+            </div>
+          </form>
+        </Panel>
       </section>
     </main>
   );

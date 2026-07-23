@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import type { Route } from "./+types/home";
 import { publicApi } from "../lib/api/client";
 import { getClientId } from "../lib/client-id";
+import { Button, Panel } from "../components/ui";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -28,44 +29,76 @@ export default function Home() {
     });
     setSubmitting(false);
     if (apiError || !data) {
-      setError("Couldn't join that game. Check the code and try again.");
+      setError("No game found at that code. Check it and try again.");
       return;
     }
     navigate(`/play/${data.code}`);
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center gap-8 p-4">
-      <h1 className="text-4xl font-bold">Quizmos</h1>
-      <form onSubmit={handleJoin} className="flex flex-col gap-4 w-full max-w-xs">
-        <input
-          className="border rounded px-3 py-2 text-center text-xl tracking-widest uppercase"
-          placeholder="Game code"
-          value={code}
-          maxLength={6}
-          onChange={(e) => setCode(e.target.value)}
-          required
-        />
-        <input
-          className="border rounded px-3 py-2"
-          placeholder="Nickname"
-          value={nickname}
-          maxLength={32}
-          onChange={(e) => setNickname(e.target.value)}
-          required
-        />
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="bg-black text-white rounded px-3 py-2 disabled:opacity-50"
-        >
-          {submitting ? "Joining…" : "Join game"}
-        </button>
-      </form>
-      <a href="/admin/login" className="text-sm text-gray-500 underline">
-        Quiz admin login
-      </a>
+    <main className="relative z-0 flex min-h-screen flex-col items-center justify-center px-4 py-12">
+      <div className="w-full max-w-sm motion-safe:animate-[rise-in_0.6s_ease-out_both]">
+        <div className="mb-10 text-center">
+          <h1 className="font-display text-4xl font-semibold tracking-tight text-paper sm:text-5xl">
+            QUIZ<span className="text-starlight">MOS</span>
+          </h1>
+          <p className="mt-3 text-sm text-dim">
+            Live trivia, beamed straight to your phone.
+          </p>
+        </div>
+
+        <Panel className="p-6 sm:p-8">
+          <form onSubmit={handleJoin} className="flex flex-col gap-5">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+                Game code
+              </span>
+              <input
+                className="rounded-lg border border-void-3 bg-void px-4 py-3 text-center font-mono text-2xl uppercase tracking-[0.35em] text-starlight outline-none transition focus:border-aurora"
+                placeholder="XXXXXX"
+                value={code}
+                maxLength={6}
+                autoComplete="off"
+                autoCapitalize="characters"
+                onChange={(e) => setCode(e.target.value)}
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+                Nickname
+              </span>
+              <input
+                className="rounded-lg border border-void-3 bg-void px-4 py-3 text-paper placeholder-dim/60 outline-none transition focus:border-aurora"
+                placeholder="How should we call you?"
+                value={nickname}
+                maxLength={32}
+                onChange={(e) => setNickname(e.target.value)}
+                required
+              />
+            </label>
+
+            {error && (
+              <p role="alert" className="text-sm text-flare">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" disabled={submitting} className="w-full">
+              {submitting ? "Joining…" : "Join game"}
+            </Button>
+          </form>
+        </Panel>
+
+        <div className="mt-8 text-center">
+          <a
+            href="/admin/login"
+            className="font-mono text-xs text-dim underline decoration-void-3 underline-offset-4 transition hover:text-aurora"
+          >
+            Quiz admin login
+          </a>
+        </div>
+      </div>
     </main>
   );
 }

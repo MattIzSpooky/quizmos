@@ -8,6 +8,7 @@ import {
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { Starfield } from "./components/Starfield";
 import "./app.css";
 
 export const links: Route.LinksFunction = () => [
@@ -19,7 +20,7 @@ export const links: Route.LinksFunction = () => [
   },
   {
     rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
+    href: "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap",
   },
 ];
 
@@ -33,6 +34,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body>
+        <Starfield />
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -46,15 +48,15 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "Oops!";
-  let details = "An unexpected error occurred.";
+  let message = "Lost signal";
+  let details = "Something drifted off course.";
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? "404" : "Error";
+    message = error.status === 404 ? "No signal here" : "Lost signal";
     details =
       error.status === 404
-        ? "The requested page could not be found."
+        ? "There's nothing charted at this coordinate."
         : error.statusText || details;
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;
@@ -62,14 +64,17 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
-      <h1>{message}</h1>
-      <p>{details}</p>
+    <main className="relative z-0 flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+      <h1 className="font-display text-3xl font-semibold text-starlight">{message}</h1>
+      <p className="text-dim">{details}</p>
       {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
+        <pre className="mt-4 w-full max-w-xl overflow-x-auto rounded-lg border border-void-3 bg-void-2 p-4 text-left text-xs text-dim">
           <code>{stack}</code>
         </pre>
       )}
+      <a href="/" className="mt-4 font-mono text-sm text-aurora underline underline-offset-4">
+        Return to base
+      </a>
     </main>
   );
 }

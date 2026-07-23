@@ -14,6 +14,7 @@ import (
 type GameSummary struct {
 	db.Game
 	QuizTitle      string
+	QuizTimed      bool
 	PlayerCount    int
 	TotalQuestions int
 }
@@ -55,6 +56,7 @@ func (s *Service) summarize(ctx context.Context, game db.Game) (GameSummary, err
 	return GameSummary{
 		Game:           game,
 		QuizTitle:      quiz.Title,
+		QuizTimed:      quiz.Timed,
 		PlayerCount:    int(playerCount),
 		TotalQuestions: int(total),
 	}, nil
@@ -224,6 +226,50 @@ func (s *Service) AdvanceGame(ctx context.Context, id uuid.UUID) (AdvanceResult,
 	return result, nil
 }
 
+// ReviewResult describes the question to broadcast as a read-only recap
+// (question.reviewed) — the game's actual state is untouched.
+type ReviewResult struct {
+	Game         GameSummary
+	Question     QuestionWithOptions
+	AnswerCounts map[uuid.UUID]int
+}
+
+// ReviewQuestion is a pure broadcast: it never mutates the game (not the
+// current-question pointer, not the answers table), so "next question"
+// always continues from wherever live play actually is regardless of
+// what's been reviewed in the meantime. targetIndex must be at or before
+// the game's current question — reviewing ahead isn't supported, since
+// that question hasn't been asked (or scored) yet.
+func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex int) (ReviewResult, error) {
+	game, err := s.q.GetGame(ctx, id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return ReviewResult{}, ErrNotFound
+		}
+		return ReviewResult{}, err
+	}
+	if game.Status != "in_progress" || !game.CurrentQuestionIndex.Valid {
+		return ReviewResult{}, ErrConflict
+	}
+	if targetIndex < 0 || targetIndex > int(game.CurrentQuestionIndex.Int32) {
+		return ReviewResult{}, ErrValidation
+	}
+
+	summary, err := s.summarize(ctx, game)
+	if err != nil {
+		return ReviewResult{}, err
+	}
+	question, _, err := s.QuestionAtIndex(ctx, game.QuizID, targetIndex)
+	if err != nil {
+		return ReviewResult{}, err
+	}
+	counts, err := s.answerCounts(ctx, question.ID)
+	if err != nil {
+		return ReviewResult{}, err
+	}
+	return ReviewResult{Game: summary, Question: question, AnswerCounts: counts}, nil
+}
+
 type EndGameResult struct {
 	Game             GameSummary
 	FinalLeaderboard []LeaderboardEntry
@@ -332,6 +378,31 @@ func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID,
 		return JoinResult{}, err
 	}
 	return JoinResult{Game: game, Player: player}, nil
+}
+
+// KickPlayer removes a player from a game's lobby. It's lobby-only —
+// removing someone mid-round would orphan any in-flight answer and skew
+// scoring — and it's not a ban: nothing stops the same client_id from
+// joining again afterward, same as anyone else.
+func (s *Service) KickPlayer(ctx context.Context, gameID, clientID uuid.UUID) error {
+	game, err := s.q.GetGame(ctx, gameID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
+		return err
+	}
+	if game.Status != "lobby" {
+		return ErrConflict
+	}
+	n, err := s.q.DeletePlayer(ctx, db.DeletePlayerParams{GameID: gameID, ClientID: clientID})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetPlayer looks up an existing player by (code, client_id) without

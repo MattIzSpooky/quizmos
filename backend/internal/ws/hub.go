@@ -240,6 +240,60 @@ func (h *Hub) ConnectedClientIDs(gameID uuid.UUID) map[string]bool {
 	return out
 }
 
+// Kick disconnects a specific client from a game's room, if they're
+// currently connected — a no-op otherwise (they may never have opened
+// the play screen). It notifies them with player.kicked first, then
+// closes the connection shortly after so the message has time to flush;
+// the room's other members learn about it the normal way, via the
+// presence.playerLeft that fires once the connection actually drops.
+func (h *Hub) Kick(gameID, clientID uuid.UUID, reason string) {
+	h.mu.RLock()
+	rm, ok := h.rooms[gameID]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	rm.mu.RLock()
+	c, ok := rm.clients[clientID]
+	rm.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	h.sendTo(c, TypePlayerKicked, PlayerKicked{Reason: reason})
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = c.conn.CloseNow()
+	}()
+}
+
+// CloseRoom disconnects every client currently in gameID's room — call it
+// once the game has ended, after broadcasting game.ended, so connections
+// don't sit open indefinitely with nothing left to happen. The same grace
+// period as Kick gives that broadcast time to actually reach clients
+// before their sockets close.
+func (h *Hub) CloseRoom(gameID uuid.UUID) {
+	h.mu.RLock()
+	rm, ok := h.rooms[gameID]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	rm.mu.RLock()
+	conns := make([]*websocket.Conn, 0, len(rm.clients))
+	for _, c := range rm.clients {
+		conns = append(conns, c.conn)
+	}
+	rm.mu.RUnlock()
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		for _, conn := range conns {
+			_ = conn.CloseNow()
+		}
+	}()
+}
+
 // Broadcast sends payload to every client currently connected to gameID's
 // room. It is a no-op if the room doesn't exist yet (e.g. no one has
 // connected). Exported for REST admin handlers to call after mutating game

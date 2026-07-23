@@ -45,3 +45,16 @@ Feature: Live gameplay over the websocket
     And the admin advances to the next question
     Then "Alice" should receive a "game.ended" message
     And the leaderboard should show "Alice" with score 200
+
+  Scenario: Going back re-shows the previous question without changing scores
+    Given the admin starts the game
+    And "Alice" answers "4"
+    And "Alice" should receive an "answer.result" message with correct true and 100 points
+    And the admin advances to the next question
+    When the admin goes back to the previous question
+    Then "Alice" should receive a "question.reviewed" message
+    And the leaderboard should show "Alice" with score 100
+
+  Scenario: Going back past the first question is rejected
+    Given the admin starts the game
+    Then going back should fail with status 400

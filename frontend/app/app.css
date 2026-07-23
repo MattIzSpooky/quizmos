@@ -1,15 +1,90 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Deep-space void, warm starlight — grounded in real star colour, not a
+     neon/purple sci-fi cliché. */
+  --color-void: #0a0b14;
+  --color-void-2: #12141f;
+  --color-void-3: #1b1e2e;
+  --color-starlight: #f2c879;
+  --color-starlight-dim: #b99a5f;
+  --color-aurora: #4fd8c4;
+  --color-flare: #f0654a;
+  --color-paper: #edeae2;
+  --color-dim: #8a8fa3;
 }
 
-html,
-body {
-  @apply bg-white dark:bg-gray-950;
+/* background lives on html only: html forms the canvas background (the
+   true bottom layer, below everything). If body also painted an opaque
+   background, that background — not being its own stacking context —
+   would paint *above* the Starfield's -z-10 layer and hide it entirely. */
+html {
+  background: var(--color-void);
+  min-height: 100%;
+}
 
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
+body {
+  color: var(--color-paper);
+  min-height: 100%;
+  font-family: var(--font-sans);
+  color-scheme: dark;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-starlight) 35%, transparent);
+  color: var(--color-void);
+}
+
+/* Keyboard focus must stay visible everywhere; style it once here instead
+   of per-component. */
+:focus-visible {
+  outline: 2px solid var(--color-aurora);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: var(--twinkle-min, 0.35);
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes star-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

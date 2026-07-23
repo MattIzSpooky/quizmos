@@ -68,4 +68,5 @@ type Quiz struct {
 	CreatedBy   string             `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Timed       bool               `json:"timed"`
 }

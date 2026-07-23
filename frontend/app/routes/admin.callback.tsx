@@ -18,8 +18,15 @@ export default function AdminCallback() {
   }, [navigate]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center">
-      {error ? <p className="text-red-600">Sign-in failed: {error}</p> : <p>Signing in…</p>}
+    <main className="relative z-0 flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+      {error ? (
+        <>
+          <p className="font-display text-lg font-semibold text-flare">Sign-in failed</p>
+          <p className="text-sm text-dim">{error}</p>
+        </>
+      ) : (
+        <p className="font-mono text-sm text-dim">Signing in…</p>
+      )}
     </main>
   );
 }

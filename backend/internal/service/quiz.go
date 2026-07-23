@@ -15,8 +15,8 @@ type QuizWithCount struct {
 	QuestionCount int
 }
 
-func (s *Service) CreateQuiz(ctx context.Context, createdBy, title, description string) (QuizWithCount, error) {
-	q, err := s.q.CreateQuiz(ctx, db.CreateQuizParams{Title: title, Description: description, CreatedBy: createdBy})
+func (s *Service) CreateQuiz(ctx context.Context, createdBy, title, description string, timed bool) (QuizWithCount, error) {
+	q, err := s.q.CreateQuiz(ctx, db.CreateQuizParams{Title: title, Description: description, CreatedBy: createdBy, Timed: timed})
 	if err != nil {
 		return QuizWithCount{}, err
 	}
@@ -66,8 +66,13 @@ func (s *Service) GetQuizDetail(ctx context.Context, id uuid.UUID) (QuizWithCoun
 	return quiz, questions, nil
 }
 
-func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, description *string) (QuizWithCount, error) {
-	params := db.UpdateQuizParams{ID: id, Title: textParam(title), Description: textParam(description)}
+func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, description *string, timed *bool) (QuizWithCount, error) {
+	params := db.UpdateQuizParams{
+		ID:          id,
+		Title:       textParam(title),
+		Description: textParam(description),
+		Timed:       boolParam(timed),
+	}
 	q, err := s.q.UpdateQuiz(ctx, params)
 	if err != nil {
 		if err == pgx.ErrNoRows {

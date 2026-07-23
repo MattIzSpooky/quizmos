@@ -25,6 +25,23 @@ func (q *Queries) AddPlayerScore(ctx context.Context, arg AddPlayerScoreParams) 
 	return err
 }
 
+const deletePlayer = `-- name: DeletePlayer :execrows
+DELETE FROM players WHERE game_id = $1 AND client_id = $2
+`
+
+type DeletePlayerParams struct {
+	GameID   uuid.UUID `json:"game_id"`
+	ClientID uuid.UUID `json:"client_id"`
+}
+
+func (q *Queries) DeletePlayer(ctx context.Context, arg DeletePlayerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePlayer, arg.GameID, arg.ClientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getPlayer = `-- name: GetPlayer :one
 SELECT id, game_id, client_id, nickname, score, joined_at FROM players WHERE game_id = $1 AND client_id = $2
 `

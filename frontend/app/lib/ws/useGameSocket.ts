@@ -16,14 +16,18 @@ export function useGameSocket(code: string | null, onMessage: (msg: ServerMessag
   const socketRef = useRef<WebSocket | null>(null);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
+  // A ref (not state) so `disconnect` can suppress the *next* reconnect
+  // attempt synchronously, without waiting on a re-render.
+  const stoppedRef = useRef(false);
 
   useEffect(() => {
     if (!code) return;
-    let closedByClient = false;
+    stoppedRef.current = false;
     let retryDelay = 1000;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     function connect() {
+      if (stoppedRef.current) return;
       const clientId = getClientId();
       const socket = new WebSocket(`${WS_BASE_URL}/games/${code}?client_id=${clientId}`);
       socketRef.current = socket;
@@ -38,7 +42,7 @@ export function useGameSocket(code: string | null, onMessage: (msg: ServerMessag
       };
       socket.onclose = () => {
         setStatus("closed");
-        if (closedByClient) return;
+        if (stoppedRef.current) return;
         retryTimer = setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, 15000);
       };
@@ -46,7 +50,7 @@ export function useGameSocket(code: string | null, onMessage: (msg: ServerMessag
 
     connect();
     return () => {
-      closedByClient = true;
+      stoppedRef.current = true;
       clearTimeout(retryTimer);
       socketRef.current?.close();
     };
@@ -56,5 +60,12 @@ export function useGameSocket(code: string | null, onMessage: (msg: ServerMessag
     socketRef.current?.send(encodeClientMessage(msg));
   }
 
-  return { status, send };
+  // For cases where the server closing the connection means "stay
+  // closed" (e.g. the player was kicked) rather than "reconnect me".
+  function disconnect() {
+    stoppedRef.current = true;
+    socketRef.current?.close();
+  }
+
+  return { status, send, disconnect };
 }

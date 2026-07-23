@@ -1,5 +1,6 @@
 import type { Route } from "./+types/admin.login";
 import { login } from "../lib/auth/keycloak";
+import { Button, Panel } from "../components/ui";
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "Quizmos Admin — Login" }];
@@ -7,11 +8,14 @@ export function meta({}: Route.MetaArgs) {
 
 export default function AdminLogin() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center gap-6">
-      <h1 className="text-2xl font-bold">Quizmos Admin</h1>
-      <button onClick={() => login()} className="bg-black text-white rounded px-4 py-2">
-        Sign in with Keycloak
-      </button>
+    <main className="relative z-0 flex min-h-screen flex-col items-center justify-center px-4">
+      <Panel className="w-full max-w-sm p-8 text-center motion-safe:animate-[rise-in_0.5s_ease-out_both]">
+        <h1 className="font-display text-2xl font-semibold text-paper">Quiz admin</h1>
+        <p className="mt-2 text-sm text-dim">Sign in to author quizzes and run live games.</p>
+        <Button onClick={() => login()} className="mt-6 w-full">
+          Sign in with Keycloak
+        </Button>
+      </Panel>
     </main>
   );
 }

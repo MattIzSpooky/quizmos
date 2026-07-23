@@ -24,19 +24,25 @@ func (q *Queries) CountQuizQuestions(ctx context.Context, quizID uuid.UUID) (int
 }
 
 const createQuiz = `-- name: CreateQuiz :one
-INSERT INTO quizzes (title, description, created_by)
-VALUES ($1, $2, $3)
-RETURNING id, title, description, created_by, created_at, updated_at
+INSERT INTO quizzes (title, description, created_by, timed)
+VALUES ($1, $2, $3, $4)
+RETURNING id, title, description, created_by, created_at, updated_at, timed
 `
 
 type CreateQuizParams struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	CreatedBy   string `json:"created_by"`
+	Timed       bool   `json:"timed"`
 }
 
 func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, error) {
-	row := q.db.QueryRow(ctx, createQuiz, arg.Title, arg.Description, arg.CreatedBy)
+	row := q.db.QueryRow(ctx, createQuiz,
+		arg.Title,
+		arg.Description,
+		arg.CreatedBy,
+		arg.Timed,
+	)
 	var i Quiz
 	err := row.Scan(
 		&i.ID,
@@ -45,6 +51,7 @@ func (q *Queries) CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, e
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timed,
 	)
 	return i, err
 }
@@ -62,7 +69,7 @@ func (q *Queries) DeleteQuiz(ctx context.Context, id uuid.UUID) (int64, error) {
 }
 
 const getQuiz = `-- name: GetQuiz :one
-SELECT id, title, description, created_by, created_at, updated_at FROM quizzes WHERE id = $1
+SELECT id, title, description, created_by, created_at, updated_at, timed FROM quizzes WHERE id = $1
 `
 
 func (q *Queries) GetQuiz(ctx context.Context, id uuid.UUID) (Quiz, error) {
@@ -75,12 +82,13 @@ func (q *Queries) GetQuiz(ctx context.Context, id uuid.UUID) (Quiz, error) {
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timed,
 	)
 	return i, err
 }
 
 const listQuizzes = `-- name: ListQuizzes :many
-SELECT id, title, description, created_by, created_at, updated_at FROM quizzes ORDER BY created_at DESC
+SELECT id, title, description, created_by, created_at, updated_at, timed FROM quizzes ORDER BY created_at DESC
 `
 
 func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
@@ -99,6 +107,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Timed,
 		); err != nil {
 			return nil, err
 		}
@@ -114,19 +123,26 @@ const updateQuiz = `-- name: UpdateQuiz :one
 UPDATE quizzes
 SET title       = COALESCE($1, title),
     description = COALESCE($2, description),
+    timed       = COALESCE($3, timed),
     updated_at  = now()
-WHERE id = $3
-RETURNING id, title, description, created_by, created_at, updated_at
+WHERE id = $4
+RETURNING id, title, description, created_by, created_at, updated_at, timed
 `
 
 type UpdateQuizParams struct {
 	Title       pgtype.Text `json:"title"`
 	Description pgtype.Text `json:"description"`
+	Timed       pgtype.Bool `json:"timed"`
 	ID          uuid.UUID   `json:"id"`
 }
 
 func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (Quiz, error) {
-	row := q.db.QueryRow(ctx, updateQuiz, arg.Title, arg.Description, arg.ID)
+	row := q.db.QueryRow(ctx, updateQuiz,
+		arg.Title,
+		arg.Description,
+		arg.Timed,
+		arg.ID,
+	)
 	var i Quiz
 	err := row.Scan(
 		&i.ID,
@@ -135,6 +151,7 @@ func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (Quiz, e
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timed,
 	)
 	return i, err
 }

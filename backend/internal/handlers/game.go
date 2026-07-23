@@ -79,7 +79,7 @@ func (h *Handlers) StartGame(ctx context.Context, req api.StartGameRequestObject
 	}
 
 	h.hub.Broadcast(req.GameId, ws.TypeGameStarted, ws.GameStarted{StartedAt: time.Now()})
-	h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(firstQuestion, 0, total))
+	h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(firstQuestion, 0, total, game.QuizTimed))
 
 	return api.StartGame200JSONResponse(gameToAPI(game)), nil
 }
@@ -103,6 +103,7 @@ func (h *Handlers) AdvanceGame(ctx context.Context, req api.AdvanceGameRequestOb
 			FinalLeaderboard: leaderboardEntriesPayload(result.FinalLeaderboard),
 			EndedAt:          time.Now(),
 		})
+		h.hub.CloseRoom(req.GameId)
 	} else {
 		leaderboard, err := h.svc.Leaderboard(ctx, req.GameId)
 		if err != nil {
@@ -113,10 +114,29 @@ func (h *Handlers) AdvanceGame(ctx context.Context, req api.AdvanceGameRequestOb
 			Entries:       leaderboardEntriesPayload(leaderboard),
 		})
 		total := result.Game.TotalQuestions
-		h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(*result.NextQuestion, result.PrevIndex+1, total))
+		h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(*result.NextQuestion, result.PrevIndex+1, total, result.Game.QuizTimed))
 	}
 
 	return api.AdvanceGame200JSONResponse(gameToAPI(result.Game)), nil
+}
+
+func (h *Handlers) ReviewQuestion(ctx context.Context, req api.ReviewQuestionRequestObject) (api.ReviewQuestionResponseObject, error) {
+	result, err := h.svc.ReviewQuestion(ctx, req.GameId, req.Body.QuestionIndex)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return api.ReviewQuestion404JSONResponse{NotFoundJSONResponse: notFoundGame()}, nil
+		case errors.Is(err, service.ErrConflict):
+			return api.ReviewQuestion409JSONResponse{ConflictJSONResponse: conflictGame("game is not in progress")}, nil
+		case errors.Is(err, service.ErrValidation):
+			return api.ReviewQuestion400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(apiError("validation_error", "questionIndex must be at or before the current question"))}, nil
+		}
+		return nil, err
+	}
+
+	h.hub.Broadcast(req.GameId, ws.TypeQuestionReviewed, questionReviewedPayload(result.Question, result.Game.TotalQuestions, result.AnswerCounts))
+
+	return api.ReviewQuestion200JSONResponse(gameToAPI(result.Game)), nil
 }
 
 func (h *Handlers) EndGame(ctx context.Context, req api.EndGameRequestObject) (api.EndGameResponseObject, error) {
@@ -131,6 +151,7 @@ func (h *Handlers) EndGame(ctx context.Context, req api.EndGameRequestObject) (a
 		FinalLeaderboard: leaderboardEntriesPayload(result.FinalLeaderboard),
 		EndedAt:          time.Now(),
 	})
+	h.hub.CloseRoom(req.GameId)
 	return api.EndGame200JSONResponse(gameToAPI(result.Game)), nil
 }
 
@@ -142,7 +163,7 @@ func (h *Handlers) GetAdminLeaderboard(ctx context.Context, req api.GetAdminLead
 	return api.GetAdminLeaderboard200JSONResponse(leaderboardToAPI(leaderboard)), nil
 }
 
-func questionStartedPayload(q service.QuestionWithOptions, index, total int) ws.QuestionStarted {
+func questionStartedPayload(q service.QuestionWithOptions, index, total int, timed bool) ws.QuestionStarted {
 	options := make([]ws.QuestionOption, len(q.Options))
 	for i, o := range q.Options {
 		options[i] = ws.QuestionOption{ID: o.ID.String(), Text: o.Text}
@@ -152,8 +173,34 @@ func questionStartedPayload(q service.QuestionWithOptions, index, total int) ws.
 		QuestionID:       q.ID.String(),
 		Prompt:           q.Prompt,
 		Options:          options,
+		Timed:            timed,
 		TimeLimitSeconds: int64(q.TimeLimitSeconds),
 		TotalQuestions:   int64(total),
+	}
+}
+
+// questionReviewedPayload renders a read-only recap of a question that's
+// already been through question.ended — the correct answer is included
+// up front, unlike questionStartedPayload.
+func questionReviewedPayload(q service.QuestionWithOptions, total int, counts map[uuid.UUID]int) ws.QuestionReviewed {
+	options := make([]ws.QuestionOption, len(q.Options))
+	var correctID string
+	answerCounts := make([]ws.AnswerCount, 0, len(q.Options))
+	for i, o := range q.Options {
+		options[i] = ws.QuestionOption{ID: o.ID.String(), Text: o.Text}
+		if o.IsCorrect {
+			correctID = o.ID.String()
+		}
+		answerCounts = append(answerCounts, ws.AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
+	}
+	return ws.QuestionReviewed{
+		QuestionIndex:   int64(q.Position),
+		QuestionID:      q.ID.String(),
+		Prompt:          q.Prompt,
+		Options:         options,
+		CorrectOptionID: correctID,
+		AnswerCounts:    answerCounts,
+		TotalQuestions:  int64(total),
 	}
 }
 

@@ -4,9 +4,11 @@
 import type {
   PresencePlayerJoined,
   PresencePlayerLeft,
+  PlayerKicked,
   GameStarted,
   QuestionStarted,
   QuestionEnded,
+  QuestionReviewed,
   AnswerResult,
   LeaderboardUpdated,
   GameEnded,
@@ -17,9 +19,11 @@ import type {
 export type ServerMessage =
   | { type: "presence.playerJoined"; payload: PresencePlayerJoined }
   | { type: "presence.playerLeft"; payload: PresencePlayerLeft }
+  | { type: "player.kicked"; payload: PlayerKicked }
   | { type: "game.started"; payload: GameStarted }
   | { type: "question.started"; payload: QuestionStarted }
   | { type: "question.ended"; payload: QuestionEnded }
+  | { type: "question.reviewed"; payload: QuestionReviewed }
   | { type: "answer.result"; payload: AnswerResult }
   | { type: "leaderboard.updated"; payload: LeaderboardUpdated }
   | { type: "game.ended"; payload: GameEnded }

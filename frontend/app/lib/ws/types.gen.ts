@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionEnded, QuestionOption, QuestionStarted } from "./file";
+//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted } from "./file";
 //
 //   const answerCount = Convert.toAnswerCount(json);
 //   const answerResult = Convert.toAnswerResult(json);
@@ -10,11 +10,13 @@
 //   const gameStarted = Convert.toGameStarted(json);
 //   const leaderboardEntry = Convert.toLeaderboardEntry(json);
 //   const leaderboardUpdated = Convert.toLeaderboardUpdated(json);
+//   const playerKicked = Convert.toPlayerKicked(json);
 //   const playerSummary = Convert.toPlayerSummary(json);
 //   const presencePlayerJoined = Convert.toPresencePlayerJoined(json);
 //   const presencePlayerLeft = Convert.toPresencePlayerLeft(json);
 //   const questionEnded = Convert.toQuestionEnded(json);
 //   const questionOption = Convert.toQuestionOption(json);
+//   const questionReviewed = Convert.toQuestionReviewed(json);
 //   const questionStarted = Convert.toQuestionStarted(json);
 //
 // These functions will throw an error if the JSON doesn't
@@ -65,6 +67,15 @@ export interface LeaderboardUpdated {
     [property: string]: any;
 }
 
+/**
+ * Unicast to the removed player only; the rest of the room instead sees the normal
+ * presence.playerLeft once the connection drops.
+ */
+export interface PlayerKicked {
+    reason: string;
+    [property: string]: any;
+}
+
 export interface PresencePlayerJoined {
     player:      PlayerSummary;
     playerCount: number;
@@ -97,19 +108,39 @@ export interface AnswerCount {
     [property: string]: any;
 }
 
-export interface QuestionStarted {
-    options:          QuestionOption[];
-    prompt:           string;
-    questionId:       string;
-    questionIndex:    number;
-    timeLimitSeconds: number;
-    totalQuestions:   number;
+/**
+ * A read-only recap of a previous question, sent when the admin goes back. Unlike
+ * question.started, the correct answer is already known (it was already revealed), and
+ * clients must not offer a way to answer it.
+ */
+export interface QuestionReviewed {
+    answerCounts:    AnswerCount[];
+    correctOptionId: string;
+    options:         QuestionOption[];
+    prompt:          string;
+    questionId:      string;
+    questionIndex:   number;
+    totalQuestions:  number;
     [property: string]: any;
 }
 
 export interface QuestionOption {
     id:   string;
     text: string;
+    [property: string]: any;
+}
+
+export interface QuestionStarted {
+    options:       QuestionOption[];
+    prompt:        string;
+    questionId:    string;
+    questionIndex: number;
+    /**
+     * Whether the client should show a countdown for this question.
+     */
+    timed:            boolean;
+    timeLimitSeconds: number;
+    totalQuestions:   number;
     [property: string]: any;
 }
 
@@ -180,6 +211,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("LeaderboardUpdated")), null, 2);
     }
 
+    public static toPlayerKicked(json: string): PlayerKicked {
+        return cast(JSON.parse(json), r("PlayerKicked"));
+    }
+
+    public static playerKickedToJson(value: PlayerKicked): string {
+        return JSON.stringify(uncast(value, r("PlayerKicked")), null, 2);
+    }
+
     public static toPlayerSummary(json: string): PlayerSummary {
         return cast(JSON.parse(json), r("PlayerSummary"));
     }
@@ -218,6 +257,14 @@ export class Convert {
 
     public static questionOptionToJson(value: QuestionOption): string {
         return JSON.stringify(uncast(value, r("QuestionOption")), null, 2);
+    }
+
+    public static toQuestionReviewed(json: string): QuestionReviewed {
+        return cast(JSON.parse(json), r("QuestionReviewed"));
+    }
+
+    public static questionReviewedToJson(value: QuestionReviewed): string {
+        return JSON.stringify(uncast(value, r("QuestionReviewed")), null, 2);
     }
 
     public static toQuestionStarted(json: string): QuestionStarted {
@@ -413,6 +460,9 @@ const typeMap: any = {
         { json: "entries", js: "entries", typ: a(r("LeaderboardEntry")) },
         { json: "questionIndex", js: "questionIndex", typ: 0 },
     ], "any"),
+    "PlayerKicked": o([
+        { json: "reason", js: "reason", typ: "" },
+    ], "any"),
     "PresencePlayerJoined": o([
         { json: "player", js: "player", typ: r("PlayerSummary") },
         { json: "playerCount", js: "playerCount", typ: 0 },
@@ -435,16 +485,26 @@ const typeMap: any = {
         { json: "count", js: "count", typ: 0 },
         { json: "optionId", js: "optionId", typ: "" },
     ], "any"),
-    "QuestionStarted": o([
+    "QuestionReviewed": o([
+        { json: "answerCounts", js: "answerCounts", typ: a(r("AnswerCount")) },
+        { json: "correctOptionId", js: "correctOptionId", typ: "" },
         { json: "options", js: "options", typ: a(r("QuestionOption")) },
         { json: "prompt", js: "prompt", typ: "" },
         { json: "questionId", js: "questionId", typ: "" },
         { json: "questionIndex", js: "questionIndex", typ: 0 },
-        { json: "timeLimitSeconds", js: "timeLimitSeconds", typ: 0 },
         { json: "totalQuestions", js: "totalQuestions", typ: 0 },
     ], "any"),
     "QuestionOption": o([
         { json: "id", js: "id", typ: "" },
         { json: "text", js: "text", typ: "" },
+    ], "any"),
+    "QuestionStarted": o([
+        { json: "options", js: "options", typ: a(r("QuestionOption")) },
+        { json: "prompt", js: "prompt", typ: "" },
+        { json: "questionId", js: "questionId", typ: "" },
+        { json: "questionIndex", js: "questionIndex", typ: 0 },
+        { json: "timed", js: "timed", typ: true },
+        { json: "timeLimitSeconds", js: "timeLimitSeconds", typ: 0 },
+        { json: "totalQuestions", js: "totalQuestions", typ: 0 },
     ], "any"),
 };

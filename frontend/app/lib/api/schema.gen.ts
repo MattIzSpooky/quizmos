@@ -179,6 +179,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/games/{gameId}/review-question": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-show an already-asked question to players for reference (e.g. the admin advanced too fast, or wants to recap for latecomers). This is a pure broadcast — it never reopens the question for answers and never changes the game's actual current question, so "next question" always continues from wherever live play really is. Only questions at or before the current one can be reviewed. */
+        post: operations["reviewQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/games/{gameId}/end": {
         parameters: {
             query?: never;
@@ -212,6 +231,26 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/games/{gameId}/players/{clientId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a player from the lobby. Only allowed before the game starts — once it's in progress, removing someone mid-round would orphan their in-flight answers and skew scoring, so this is lobby-only. A kicked player can rejoin with a fresh nickname like anyone else; this isn't a ban. */
+        delete: operations["kickPlayer"];
         options?: never;
         head?: never;
         patch?: never;
@@ -286,6 +325,8 @@ export interface components {
             title: string;
             description?: string;
             questionCount: number;
+            /** @description Whether questions in this quiz show a countdown to players. When false, the admin paces the game manually with no time pressure shown. */
+            timed: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -297,10 +338,13 @@ export interface components {
         CreateQuizRequest: {
             title: string;
             description?: string;
+            /** @default true */
+            timed: boolean;
         };
         UpdateQuizRequest: {
             title?: string;
             description?: string;
+            timed?: boolean;
         };
         QuestionOption: {
             /** Format: uuid */
@@ -343,6 +387,10 @@ export interface components {
         };
         ReorderQuestionsRequest: {
             questionIds: string[];
+        };
+        ReviewQuestionRequest: {
+            /** @description Must be at or before the game's current question index. */
+            questionIndex: number;
         };
         CreateGameRequest: {
             /** Format: uuid */
@@ -880,6 +928,37 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    reviewQuestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewQuestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Question re-broadcast to players */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGame"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     endGame: {
         parameters: {
             query?: never;
@@ -928,6 +1007,31 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    kickPlayer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Player removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     joinGame: {

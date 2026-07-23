@@ -46,23 +46,32 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^I am authenticated as an admin$`, iAmAuthenticatedAsAnAdmin)
 
 	sc.Step(`^(?:I create a|a) quiz titled "([^"]*)"$`, aQuizTitled)
+	sc.Step(`^(?:I create an|an) untimed quiz titled "([^"]*)"$`, anUntimedQuizTitled)
 	sc.Step(`^(?:I add a|a) multiple choice question "([^"]*)" with options:$`, aMultipleChoiceQuestionWithOptions)
 	sc.Step(`^the quiz should have (\d+) questions?$`, theQuizShouldHaveNQuestions)
 
 	sc.Step(`^I create a game for the quiz$`, iCreateAGameForTheQuiz)
 	sc.Step(`^"([^"]*)" joins the game$`, joinsTheGame)
+	sc.Step(`^"([^"]*)" rejoins the game$`, rejoinsTheGame)
 	sc.Step(`^"([^"]*)" tries to join game code "([^"]*)"$`, triesToJoinGameCode)
 	sc.Step(`^the request should succeed$`, theRequestShouldSucceed)
 	sc.Step(`^the request should fail with status (\d+)$`, theRequestShouldFailWithStatus)
 	sc.Step(`^the game should have (\d+) players?$`, theGameShouldHaveNPlayers)
+	sc.Step(`^the admin kicks "([^"]*)"$`, theAdminKicks)
+	sc.Step(`^kicking "([^"]*)" should fail with status (\d+)$`, kickingShouldFailWithStatus)
 
 	sc.Step(`^"([^"]*)" connects to the game websocket$`, connectsToTheGameWebsocket)
 	sc.Step(`^the admin starts the game$`, theAdminStartsTheGame)
 	sc.Step(`^starting the game should fail with status (\d+)$`, startingTheGameShouldFailWithStatus)
 	sc.Step(`^the admin advances to the next question$`, theAdminAdvancesToTheNextQuestion)
+	sc.Step(`^the admin goes back to the previous question$`, theAdminGoesBackToThePreviousQuestion)
+	sc.Step(`^going back should fail with status (\d+)$`, goingBackShouldFailWithStatus)
+	sc.Step(`^the admin reviews question (\d+)$`, theAdminReviewsQuestionN)
+	sc.Step(`^reviewing question (\d+) should fail with status (\d+)$`, reviewingQuestionNShouldFailWithStatus)
 	sc.Step(`^the admin ends the game$`, theAdminEndsTheGame)
 
 	sc.Step(`^"([^"]*)" should receive a "([^"]*)" message$`, shouldReceiveAMessage)
+	sc.Step(`^"([^"]*)" should receive a "question\.started" message with timed (true|false)$`, shouldReceiveQuestionStartedWithTimed)
 	sc.Step(`^"([^"]*)" answers "([^"]*)"$`, answers)
 	sc.Step(`^"([^"]*)" should receive an "answer\.result" message with correct (true|false) and (\d+) points$`, shouldReceiveAnAnswerResult)
 
@@ -86,6 +95,19 @@ func iAmAuthenticatedAsAnAdmin(ctx context.Context) error {
 func aQuizTitled(ctx context.Context, title string) error {
 	w := worldFromContext(ctx)
 	resp, err := w.adminRequest(ctx, http.MethodPost, "/admin/quizzes", map[string]any{"title": title})
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusCreated {
+		return fmt.Errorf("expected 201 creating quiz, got %d: %v", resp.Status, resp.Body)
+	}
+	w.quizID = resp.Body["id"].(string)
+	return nil
+}
+
+func anUntimedQuizTitled(ctx context.Context, title string) error {
+	w := worldFromContext(ctx)
+	resp, err := w.adminRequest(ctx, http.MethodPost, "/admin/quizzes", map[string]any{"title": title, "timed": false})
 	if err != nil {
 		return err
 	}
@@ -183,7 +205,22 @@ func triesToJoinGameCode(ctx context.Context, nickname, code string) error {
 }
 
 func doJoin(ctx context.Context, w *World, nickname, code string) error {
-	clientID := w.newClientID()
+	return doJoinAs(ctx, w, nickname, code, w.newClientID())
+}
+
+// rejoinsTheGame reuses the same client_id as an earlier join — unlike
+// joinsTheGame, which always mints a fresh one — to verify that a kicked
+// player can really come back as themselves, not just as a new stranger.
+func rejoinsTheGame(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	existing, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q was never registered in this scenario", nickname)
+	}
+	return doJoinAs(ctx, w, nickname, w.gameCode, existing.clientID)
+}
+
+func doJoinAs(ctx context.Context, w *World, nickname, code, clientID string) error {
 	resp, err := w.publicRequest(ctx, http.MethodPost, "/games/join", clientID, map[string]any{
 		"code":     code,
 		"nickname": nickname,
@@ -222,6 +259,33 @@ func theGameShouldHaveNPlayers(ctx context.Context, want int) error {
 	got := int(resp.Body["playerCount"].(float64))
 	if got != want {
 		return fmt.Errorf("expected %d players, got %d", want, got)
+	}
+	return nil
+}
+
+func theAdminKicks(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	return kickPlayer(ctx, w, nickname, http.StatusNoContent)
+}
+
+func kickingShouldFailWithStatus(ctx context.Context, nickname string, want int) error {
+	w := worldFromContext(ctx)
+	return kickPlayer(ctx, w, nickname, want)
+}
+
+func kickPlayer(ctx context.Context, w *World, nickname string, wantStatus int) error {
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	path := fmt.Sprintf("/admin/games/%s/players/%s", w.gameID, p.clientID)
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != wantStatus {
+		return fmt.Errorf("expected status %d kicking %q, got %d: %v", wantStatus, nickname, resp.Status, resp.Body)
 	}
 	return nil
 }
@@ -277,6 +341,64 @@ func theAdminAdvancesToTheNextQuestion(ctx context.Context) error {
 	return nil
 }
 
+// currentQuestionIndex fetches the game's live current-question index
+// (0-based) from the admin API, so steps can compute "one before that"
+// without the World tracking it separately.
+func currentQuestionIndex(ctx context.Context, w *World) (int, error) {
+	path := fmt.Sprintf("/admin/games/%s", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return 0, err
+	}
+	idx, ok := resp.Body["currentQuestionIndex"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("game has no current question index (status: %v)", resp.Body["status"])
+	}
+	return int(idx), nil
+}
+
+func theAdminGoesBackToThePreviousQuestion(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	current, err := currentQuestionIndex(ctx, w)
+	if err != nil {
+		return err
+	}
+	return reviewQuestionAtIndex(ctx, w, current-1, http.StatusOK)
+}
+
+func goingBackShouldFailWithStatus(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	current, err := currentQuestionIndex(ctx, w)
+	if err != nil {
+		return err
+	}
+	return reviewQuestionAtIndex(ctx, w, current-1, want)
+}
+
+// theAdminReviewsQuestionN uses 1-based question numbers to match how
+// they're referred to in feature files ("question 1", "question 2", ...).
+func theAdminReviewsQuestionN(ctx context.Context, n int) error {
+	w := worldFromContext(ctx)
+	return reviewQuestionAtIndex(ctx, w, n-1, http.StatusOK)
+}
+
+func reviewingQuestionNShouldFailWithStatus(ctx context.Context, n, want int) error {
+	w := worldFromContext(ctx)
+	return reviewQuestionAtIndex(ctx, w, n-1, want)
+}
+
+func reviewQuestionAtIndex(ctx context.Context, w *World, index, wantStatus int) error {
+	path := fmt.Sprintf("/admin/games/%s/review-question", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{"questionIndex": index})
+	if err != nil {
+		return err
+	}
+	if resp.Status != wantStatus {
+		return fmt.Errorf("expected status %d reviewing question index %d, got %d: %v", wantStatus, index, resp.Status, resp.Body)
+	}
+	return nil
+}
+
 func theAdminEndsTheGame(ctx context.Context) error {
 	w := worldFromContext(ctx)
 	path := fmt.Sprintf("/admin/games/%s/end", w.gameID)
@@ -298,6 +420,30 @@ func shouldReceiveAMessage(ctx context.Context, nickname, msgType string) error 
 	}
 	_, err := p.waitFor(ctx, msgType, defaultWaitTimeout)
 	return err
+}
+
+func shouldReceiveQuestionStartedWithTimed(ctx context.Context, nickname, wantTimedStr string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	wantTimed, err := strconv.ParseBool(wantTimedStr)
+	if err != nil {
+		return fmt.Errorf("parsing expected 'timed' value %q: %w", wantTimedStr, err)
+	}
+	env, err := p.waitFor(ctx, ws.TypeQuestionStarted, defaultWaitTimeout)
+	if err != nil {
+		return err
+	}
+	var qs ws.QuestionStarted
+	if err := json.Unmarshal(env.Payload, &qs); err != nil {
+		return err
+	}
+	if qs.Timed != wantTimed {
+		return fmt.Errorf("expected timed=%v, got %v", wantTimed, qs.Timed)
+	}
+	return nil
 }
 
 func answers(ctx context.Context, nickname, optionText string) error {

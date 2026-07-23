@@ -385,6 +385,44 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /admin/games/{gameId}/review-question:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    post:
+      operationId: reviewQuestion
+      tags: [games]
+      summary: >
+        Re-show an already-asked question to players for reference (e.g.
+        the admin advanced too fast, or wants to recap for latecomers).
+        This is a pure broadcast — it never reopens the question for
+        answers and never changes the game's actual current question, so
+        "next question" always continues from wherever live play really
+        is. Only questions at or before the current one can be reviewed.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewQuestionRequest"
+      responses:
+        "200":
+          description: Question re-broadcast to players
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGame"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /admin/games/{gameId}/end:
     parameters:
       - $ref: "#/components/parameters/GameId"
@@ -428,6 +466,37 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /admin/games/{gameId}/players/{clientId}:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+      - name: clientId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: kickPlayer
+      tags: [players]
+      summary: >
+        Remove a player from the lobby. Only allowed before the game
+        starts — once it's in progress, removing someone mid-round would
+        orphan their in-flight answers and skew scoring, so this is
+        lobby-only. A kicked player can rejoin with a fresh nickname like
+        anyone else; this isn't a ban.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Player removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /games/join:
     post:
@@ -596,7 +665,7 @@ components:
 
     Quiz:
       type: object
-      required: [id, title, questionCount, createdAt, updatedAt]
+      required: [id, title, questionCount, timed, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -607,6 +676,12 @@ components:
           type: string
         questionCount:
           type: integer
+        timed:
+          type: boolean
+          description: >
+            Whether questions in this quiz show a countdown to players.
+            When false, the admin paces the game manually with no time
+            pressure shown.
         createdAt:
           type: string
           format: date-time
@@ -634,6 +709,9 @@ components:
           minLength: 1
         description:
           type: string
+        timed:
+          type: boolean
+          default: true
 
     UpdateQuizRequest:
       type: object
@@ -643,6 +721,8 @@ components:
           minLength: 1
         description:
           type: string
+        timed:
+          type: boolean
 
     QuestionOption:
       type: object
@@ -744,6 +824,15 @@ components:
           items:
             type: string
             format: uuid
+
+    ReviewQuestionRequest:
+      type: object
+      required: [questionIndex]
+      properties:
+        questionIndex:
+          type: integer
+          minimum: 0
+          description: Must be at or before the game's current question index.
 
     CreateGameRequest:
       type: object

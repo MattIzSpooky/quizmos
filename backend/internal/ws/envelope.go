@@ -14,9 +14,11 @@ type Envelope struct {
 const (
 	TypePresencePlayerJoined = "presence.playerJoined"
 	TypePresencePlayerLeft   = "presence.playerLeft"
+	TypePlayerKicked         = "player.kicked"
 	TypeGameStarted          = "game.started"
 	TypeQuestionStarted      = "question.started"
 	TypeQuestionEnded        = "question.ended"
+	TypeQuestionReviewed     = "question.reviewed"
 	TypeAnswerResult         = "answer.result"
 	TypeLeaderboardUpdated   = "leaderboard.updated"
 	TypeGameEnded            = "game.ended"

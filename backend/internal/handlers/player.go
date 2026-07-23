@@ -27,6 +27,20 @@ func (h *Handlers) JoinGame(ctx context.Context, req api.JoinGameRequestObject) 
 	}, nil
 }
 
+func (h *Handlers) KickPlayer(ctx context.Context, req api.KickPlayerRequestObject) (api.KickPlayerResponseObject, error) {
+	if err := h.svc.KickPlayer(ctx, req.GameId, req.ClientId); err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return api.KickPlayer404JSONResponse{NotFoundJSONResponse: notFoundGame()}, nil
+		case errors.Is(err, service.ErrConflict):
+			return api.KickPlayer409JSONResponse{ConflictJSONResponse: conflictGame("players can only be kicked while the game is in the lobby")}, nil
+		}
+		return nil, err
+	}
+	h.hub.Kick(req.GameId, req.ClientId, "Removed by the host")
+	return api.KickPlayer204Response{}, nil
+}
+
 func (h *Handlers) GetPublicGame(ctx context.Context, req api.GetPublicGameRequestObject) (api.GetPublicGameResponseObject, error) {
 	game, err := h.svc.GetPublicGame(ctx, req.Code)
 	if err != nil {

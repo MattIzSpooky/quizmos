@@ -36,3 +36,31 @@ Feature: Game lifecycle
     Given I create a game for the quiz
     And the admin starts the game
     Then starting the game should fail with status 409
+
+  Scenario: Kicking a player removes them from the lobby
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    And "Bob" joins the game
+    When the admin kicks "Bob"
+    Then the game should have 1 players
+
+  Scenario: A kicked player can rejoin
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    And the admin kicks "Alice"
+    When "Alice" rejoins the game
+    Then the request should succeed
+    And the game should have 1 players
+
+  Scenario: Kicking is not allowed once the game has started
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    And the admin starts the game
+    Then kicking "Alice" should fail with status 409
+
+  Scenario: The kicked player is notified over their own connection
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    And "Alice" connects to the game websocket
+    When the admin kicks "Alice"
+    Then "Alice" should receive a "player.kicked" message

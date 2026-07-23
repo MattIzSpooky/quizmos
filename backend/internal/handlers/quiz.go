@@ -13,7 +13,11 @@ func (h *Handlers) CreateQuiz(ctx context.Context, req api.CreateQuizRequestObje
 	if req.Body.Description != nil {
 		description = *req.Body.Description
 	}
-	quiz, err := h.svc.CreateQuiz(ctx, adminSubject(ctx), req.Body.Title, description)
+	timed := true
+	if req.Body.Timed != nil {
+		timed = *req.Body.Timed
+	}
+	quiz, err := h.svc.CreateQuiz(ctx, adminSubject(ctx), req.Body.Title, description, timed)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +48,7 @@ func (h *Handlers) GetQuiz(ctx context.Context, req api.GetQuizRequestObject) (a
 }
 
 func (h *Handlers) UpdateQuiz(ctx context.Context, req api.UpdateQuizRequestObject) (api.UpdateQuizResponseObject, error) {
-	quiz, err := h.svc.UpdateQuiz(ctx, req.QuizId, req.Body.Title, req.Body.Description)
+	quiz, err := h.svc.UpdateQuiz(ctx, req.QuizId, req.Body.Title, req.Body.Description, req.Body.Timed)
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) {
 			return api.UpdateQuiz404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "quiz not found"))}, nil

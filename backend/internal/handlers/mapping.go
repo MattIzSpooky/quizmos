@@ -15,6 +15,7 @@ func quizToAPI(q service.QuizWithCount) api.Quiz {
 		Title:         q.Title,
 		Description:   &desc,
 		QuestionCount: q.QuestionCount,
+		Timed:         q.Timed,
 		CreatedAt:     service.TimeOrZero(q.CreatedAt),
 		UpdatedAt:     service.TimeOrZero(q.UpdatedAt),
 	}
@@ -31,6 +32,7 @@ func quizDetailToAPI(q service.QuizWithCount, questions []service.QuestionWithOp
 		Title:         base.Title,
 		Description:   base.Description,
 		QuestionCount: base.QuestionCount,
+		Timed:         base.Timed,
 		CreatedAt:     base.CreatedAt,
 		UpdatedAt:     base.UpdatedAt,
 		Questions:     apiQuestions,
