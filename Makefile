@@ -4,7 +4,6 @@ BACKEND := backend
 FRONTEND := frontend
 TOOLS := tools
 API_DIR := api
-DEPLOY := deploy
 
 DATABASE_URL ?= postgres://quizmos:quizmos-dev@localhost:5432/quizmos?sslmode=disable
 
@@ -20,13 +19,14 @@ help:
 	@echo "  make migrate-up         apply database migrations"
 	@echo "  make migrate-down       roll back the last migration"
 	@echo "  make migrate-new name=add_foo   scaffold a new migration pair"
-	@echo "  make dev-up / dev-down  start/stop local Postgres + Keycloak via docker compose"
+	@echo "  make dev-up / dev-down  start/stop local Postgres + Keycloak only, for native go run/npm run dev"
 	@echo "  make run-backend        run the Go backend"
 	@echo "  make run-frontend       run the React dev server"
 	@echo "  make build              build backend binary + frontend production bundle"
 	@echo "  make test               run everything: unit tests, e2e feature tests, frontend typecheck"
 	@echo "  make test-unit          run fast backend unit tests only (no Docker required)"
 	@echo "  make test-e2e           run the Gherkin/godog e2e suite (needs a Docker daemon)"
+	@echo "  make demo-up / demo-down  build and run the whole stack (postgres, keycloak, backend, frontend)"
 
 # ---------------------------------------------------------------------------
 # Tooling
@@ -92,15 +92,27 @@ migrate-new:
 
 # ---------------------------------------------------------------------------
 # Local dev environment
+#
+# dev-up/dev-down bring up just the infra (Postgres + Keycloak) for running
+# the backend/frontend natively via `go run`/`npm run dev`. demo-up/demo-down
+# run the whole stack in containers instead — see docker-compose.yml.
 # ---------------------------------------------------------------------------
 
 .PHONY: dev-up
 dev-up:
-	docker compose -f $(DEPLOY)/docker-compose.yml up -d
+	docker compose up -d postgres keycloak
 
 .PHONY: dev-down
 dev-down:
-	docker compose -f $(DEPLOY)/docker-compose.yml down
+	docker compose stop postgres keycloak
+
+.PHONY: demo-up
+demo-up:
+	docker compose up -d --build
+
+.PHONY: demo-down
+demo-down:
+	docker compose down
 
 .PHONY: run-backend
 run-backend:

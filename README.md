@@ -69,6 +69,24 @@ The frontend dev server runs at `http://localhost:5173`, the backend at
 with the seeded Keycloak user `admin@quizmos.dev` / `quizmos-dev` (from
 `deploy/keycloak/realm-export.json`).
 
+## Running the whole stack in Docker (demo)
+
+For a quick demo, or anywhere you'd rather not install Go/Node locally,
+`docker-compose.yml` at the repo root runs everything — Postgres,
+Keycloak, a one-shot migration job, the backend, and the frontend — built
+from `backend/Dockerfile` and `frontend/Dockerfile` (both multi-stage):
+
+```bash
+make demo-up      # builds images and starts the whole stack in the background
+make demo-down    # tears it down
+```
+
+Once it's up, the frontend is at `http://localhost:5173` and the backend
+at `http://localhost:8080`, same as local dev — sign in with the same
+seeded Keycloak user. `make dev-up`/`dev-down` remain for the
+Postgres+Keycloak-only workflow above, if you'd rather run the backend and
+frontend natively while iterating.
+
 ## Code generation
 
 Nothing under a `.gen.` filename (or `internal/api`, `internal/db/sqlc`,
