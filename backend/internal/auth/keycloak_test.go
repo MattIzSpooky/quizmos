@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -192,5 +193,69 @@ func TestVerify_TamperedSignatureRejected(t *testing.T) {
 
 	if _, err := kc.Verify(tampered); err == nil {
 		t.Fatal("expected an error verifying a tampered token, got nil")
+	}
+}
+
+func TestRequireAdminToken_ValidTokenWithAdminRole(t *testing.T) {
+	jwks := newFakeJWKS(t)
+	kc := newTestKeycloak(t, jwks.issuer)
+	token := jwks.mint(t, []string{"quiz-admin"}, time.Hour)
+
+	claims, err := kc.RequireAdminToken("Bearer " + token)
+	if err != nil {
+		t.Fatalf("RequireAdminToken: %v", err)
+	}
+	if claims.Subject != "user-123" {
+		t.Errorf("Subject = %q, want %q", claims.Subject, "user-123")
+	}
+}
+
+func TestRequireAdminToken_MissingBearerPrefix(t *testing.T) {
+	jwks := newFakeJWKS(t)
+	kc := newTestKeycloak(t, jwks.issuer)
+	token := jwks.mint(t, []string{"quiz-admin"}, time.Hour)
+
+	_, err := kc.RequireAdminToken(token) // no "Bearer " prefix
+	if err == nil {
+		t.Fatal("expected an error for a header missing the Bearer prefix")
+	}
+	var statusErr interface{ HTTPStatus() int }
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("expected an *httpStatusError, got %T", err)
+	}
+	if statusErr.HTTPStatus() != http.StatusUnauthorized {
+		t.Errorf("HTTPStatus() = %d, want %d", statusErr.HTTPStatus(), http.StatusUnauthorized)
+	}
+}
+
+func TestRequireAdminToken_InvalidToken(t *testing.T) {
+	jwks := newFakeJWKS(t)
+	kc := newTestKeycloak(t, jwks.issuer)
+
+	_, err := kc.RequireAdminToken("Bearer not-a-real-token")
+	if err == nil {
+		t.Fatal("expected an error for an unparseable token")
+	}
+	var statusErr interface{ HTTPStatus() int }
+	if !errors.As(err, &statusErr) || statusErr.HTTPStatus() != http.StatusUnauthorized {
+		t.Errorf("expected a 401 status error, got %v", err)
+	}
+}
+
+func TestRequireAdminToken_MissingAdminRole(t *testing.T) {
+	jwks := newFakeJWKS(t)
+	kc := newTestKeycloak(t, jwks.issuer)
+	token := jwks.mint(t, []string{"some-other-role"}, time.Hour)
+
+	_, err := kc.RequireAdminToken("Bearer " + token)
+	if err == nil {
+		t.Fatal("expected an error for a token without the admin role")
+	}
+	var statusErr interface{ HTTPStatus() int }
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("expected an *httpStatusError, got %T", err)
+	}
+	if statusErr.HTTPStatus() != http.StatusForbidden {
+		t.Errorf("HTTPStatus() = %d, want %d", statusErr.HTTPStatus(), http.StatusForbidden)
 	}
 }
