@@ -24,6 +24,22 @@ function PauseIcon() {
   );
 }
 
+// Fully hand-style both the track and the thumb rather than leaning on
+// the browser/OS default plus `accent-color` for a tint: iOS Safari in
+// particular keeps rendering its own native track fill even once the
+// thumb is restyled unless `::-webkit-slider-runnable-track` is
+// overridden too, which is what made the bar look inconsistent on an
+// iPhone. Setting every pseudo-element explicitly (track height/color,
+// thumb size/color, and a webkit-only vertical offset to center the
+// thumb on the thinner track) makes it render identically everywhere.
+const RANGE_INPUT_CLASSES = [
+  "appearance-none bg-transparent cursor-pointer",
+  "[&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-void-3",
+  "[&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-void-3",
+  "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:mt-[-3px] [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-starlight [&::-webkit-slider-thumb]:cursor-pointer",
+  "[&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-starlight [&::-moz-range-thumb]:cursor-pointer",
+].join(" ");
+
 function VolumeIcon({ muted }: { muted: boolean }) {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -137,7 +153,14 @@ export function AudioPlayer({ src, className = "" }: { src: string; className?: 
         value={currentTime}
         onChange={seek}
         aria-label="Seek"
-        className="h-1.5 flex-1 cursor-pointer accent-starlight"
+        // min-w-0 overrides the flex item default of min-width: auto —
+        // without it, some browsers (Safari in particular) refuse to
+        // shrink a <input type="range"> below its native intrinsic
+        // width, so on a narrow phone the row's total content (play
+        // button + this + the time readout + mute button) overflows
+        // past the card's right edge instead of the bar actually
+        // shrinking to fit.
+        className={`h-3 min-w-0 flex-1 ${RANGE_INPUT_CLASSES}`}
       />
       <span className="shrink-0 font-mono text-xs tabular-nums text-dim">
         {formatTime(currentTime)} / {formatTime(duration)}
@@ -158,7 +181,7 @@ export function AudioPlayer({ src, className = "" }: { src: string; className?: 
         value={effectiveMuted ? 0 : volume}
         onChange={changeVolume}
         aria-label="Volume"
-        className="hidden h-1.5 w-16 shrink-0 cursor-pointer accent-starlight sm:block"
+        className={`hidden h-3 w-16 shrink-0 sm:block ${RANGE_INPUT_CLASSES}`}
       />
     </div>
   );

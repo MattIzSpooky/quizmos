@@ -176,7 +176,10 @@ export default function Play({ params }: Route.ComponentProps) {
         )}
 
         {state.phase === "question" && (
-          <div className="flex w-full flex-col gap-6 motion-safe:animate-[rise-in_0.4s_ease-out_both]">
+          <div
+            key={state.question.questionId}
+            className="flex w-full flex-col gap-6 motion-safe:animate-[rise-in_0.4s_ease-out_both]"
+          >
             <div className="flex items-center gap-4">
               {state.question.timed && (
                 <OrbitTimer key={state.question.questionId} totalSeconds={state.question.timeLimitSeconds} />
@@ -321,7 +324,10 @@ export default function Play({ params }: Route.ComponentProps) {
         )}
 
         {state.phase === "review" && (
-          <div className="flex w-full flex-col gap-5 motion-safe:animate-[rise-in_0.4s_ease-out_both]">
+          <div
+            key={state.review.questionId}
+            className="flex w-full flex-col gap-5 motion-safe:animate-[rise-in_0.4s_ease-out_both]"
+          >
             <div
               role="status"
               className="flex items-center justify-center gap-2 rounded-full border border-ember/40 bg-ember/10 px-4 py-2"
