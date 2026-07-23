@@ -265,6 +265,12 @@ components:
           type: integer
         yourAnswer:
           $ref: "#/components/schemas/YourAnswer"
+        mediaUrl:
+          type: string
+          description: Absent when the question has no attached media.
+        mediaType:
+          type: string
+          enum: [image, audio]
 
     YourAnswer:
       type: object
@@ -350,6 +356,12 @@ components:
             $ref: "#/components/schemas/AnswerCount"
         totalQuestions:
           type: integer
+        mediaUrl:
+          type: string
+          description: Absent when the question has no attached media.
+        mediaType:
+          type: string
+          enum: [image, audio]
 
     QuestionAnswersReset:
       type: object

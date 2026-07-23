@@ -44,7 +44,7 @@ func questionToAPI(q service.QuestionWithOptions) api.Question {
 	for i, o := range q.Options {
 		options[i] = api.QuestionOptionWithAnswer{Id: o.ID, Text: o.Text, IsCorrect: o.IsCorrect}
 	}
-	return api.Question{
+	out := api.Question{
 		Id:               q.ID,
 		QuizId:           q.QuizID,
 		Type:             api.QuestionType(q.Type),
@@ -54,6 +54,13 @@ func questionToAPI(q service.QuestionWithOptions) api.Question {
 		Points:           int(q.Points),
 		Options:          options,
 	}
+	if q.MediaKey.Valid {
+		url := q.MediaURL
+		mediaType := api.MediaType(q.MediaType.String)
+		out.MediaUrl = &url
+		out.MediaType = &mediaType
+	}
+	return out
 }
 
 func createQuestionOptionsToService(opts []api.CreateQuestionOption) []service.QuestionOptionInput {

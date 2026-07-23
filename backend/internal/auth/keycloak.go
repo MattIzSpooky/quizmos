@@ -128,6 +128,29 @@ func (k *Keycloak) Verify(token string) (AdminClaims, error) {
 	return AdminClaims{Subject: sub, Roles: ra.Roles}, nil
 }
 
+// RequireAdminToken validates a raw "Authorization" header value ("Bearer
+// <token>") and checks the admin role, returning the claims on success.
+// Shared by AuthenticationFunc (the normal path, via openapi3filter) and
+// by routes that bypass the standard request validator entirely — the
+// question-media upload/delete handlers, whose multipart body the
+// validator would otherwise consume before the handler can stream it to
+// storage (see httpserver's Skipper).
+func (k *Keycloak) RequireAdminToken(header string) (AdminClaims, error) {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return AdminClaims{}, &httpStatusError{status: http.StatusUnauthorized, message: "missing bearer token"}
+	}
+
+	claims, err := k.Verify(strings.TrimPrefix(header, prefix))
+	if err != nil {
+		return AdminClaims{}, &httpStatusError{status: http.StatusUnauthorized, message: "invalid bearer token"}
+	}
+	if !claims.HasRole(k.adminRole) {
+		return AdminClaims{}, &httpStatusError{status: http.StatusForbidden, message: "missing required role"}
+	}
+	return claims, nil
+}
+
 // AuthenticationFunc plugs into oapi-codegen's request validator
 // (openapi3filter.Options.AuthenticationFunc). It only runs for operations
 // whose OpenAPI spec declares `security: [{bearerAuth: []}]`, so it doubles
@@ -137,18 +160,9 @@ func (k *Keycloak) AuthenticationFunc(ctx context.Context, ai *openapi3filter.Au
 		return fmt.Errorf("unsupported security scheme %q", ai.SecuritySchemeName)
 	}
 
-	header := ai.RequestValidationInput.Request.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		return &httpStatusError{status: http.StatusUnauthorized, message: "missing bearer token"}
-	}
-
-	claims, err := k.Verify(strings.TrimPrefix(header, prefix))
+	claims, err := k.RequireAdminToken(ai.RequestValidationInput.Request.Header.Get("Authorization"))
 	if err != nil {
-		return &httpStatusError{status: http.StatusUnauthorized, message: "invalid bearer token"}
-	}
-	if !claims.HasRole(k.adminRole) {
-		return &httpStatusError{status: http.StatusForbidden, message: "missing required role"}
+		return err
 	}
 
 	*ai.RequestValidationInput.Request = *ai.RequestValidationInput.Request.WithContext(

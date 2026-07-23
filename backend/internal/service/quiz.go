@@ -2,13 +2,19 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 )
+
+// pgForeignKeyViolation is Postgres's SQLSTATE for a foreign-key
+// constraint violation (23503).
+const pgForeignKeyViolation = "23503"
 
 type QuizWithCount struct {
 	db.Quiz
@@ -87,9 +93,18 @@ func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, descripti
 	return QuizWithCount{Quiz: q, QuestionCount: int(count)}, nil
 }
 
+// DeleteQuiz removes a quiz and its questions (cascading). A quiz that
+// still has any game created from it — lobby, in-progress, or ended —
+// can't be deleted: games.quiz_id is ON DELETE RESTRICT, since a game is
+// a historical record of a play session and shouldn't silently lose the
+// quiz it was played from.
 func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) error {
 	n, err := s.q.DeleteQuiz(ctx, id)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return ErrConflict
+		}
 		return err
 	}
 	if n == 0 {

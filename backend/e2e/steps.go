@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/cucumber/godog"
+	"github.com/google/uuid"
 
+	"github.com/mattizspooky/quizmos/backend/internal/service"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
@@ -49,9 +52,35 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^(?:I create a|a) quiz titled "([^"]*)"$`, aQuizTitled)
 	sc.Step(`^(?:I create an|an) untimed quiz titled "([^"]*)"$`, anUntimedQuizTitled)
 	sc.Step(`^(?:I add a|a) multiple choice question "([^"]*)" with options:$`, aMultipleChoiceQuestionWithOptions)
+	sc.Step(`^I try to add a multiple choice question "([^"]*)" with options:$`, iTryToAddAMultipleChoiceQuestionWithOptions)
 	sc.Step(`^(?:I add a|a) free text question "([^"]*)"$`, aFreeTextQuestion)
 	sc.Step(`^I try to add a free text question "([^"]*)" with options:$`, iTryToAddAFreeTextQuestionWithOptions)
 	sc.Step(`^the quiz should have (\d+) questions?$`, theQuizShouldHaveNQuestions)
+	sc.Step(`^I update "([^"]*)" to prompt "([^"]*)" and (\d+) points$`, iUpdateQuestionPromptAndPoints)
+	sc.Step(`^"([^"]*)" should have (\d+) points$`, theQuestionShouldHavePoints)
+	sc.Step(`^I delete the question "([^"]*)"$`, iDeleteTheQuestion)
+	sc.Step(`^I reorder the questions to:$`, iReorderTheQuestionsTo)
+	sc.Step(`^I try to reorder the questions to:$`, iReorderTheQuestionsTo)
+	sc.Step(`^the questions should be in this order:$`, theQuestionsShouldBeInOrder)
+	sc.Step(`^I update the quiz to title "([^"]*)" and timed (true|false)$`, iUpdateTheQuizToTitleAndTimed)
+	sc.Step(`^the quiz should be titled "([^"]*)" and (timed|untimed)$`, theQuizShouldBeTitledAndTimed)
+	sc.Step(`^I delete the quiz$`, iDeleteTheQuiz)
+	sc.Step(`^I try to delete the quiz$`, iTryToDeleteTheQuiz)
+	sc.Step(`^getting the quiz should fail with status (\d+)$`, gettingTheQuizShouldFailWithStatus)
+	sc.Step(`^getting an unknown quiz should fail with status (\d+)$`, gettingAnUnknownQuizShouldFailWithStatus)
+	sc.Step(`^the quiz list should include "([^"]*)" and "([^"]*)"$`, theQuizListShouldInclude)
+	sc.Step(`^the game list should include this game$`, theGameListShouldIncludeThisGame)
+	sc.Step(`^the game list filtered by status "([^"]*)" should (include|not include) this game$`, theGameListFilteredByStatusShouldIncludeThisGame)
+
+	sc.Step(`^the admin uploads an? image as media for "([^"]*)"$`, theAdminUploadsImageMediaFor)
+	sc.Step(`^the admin uploads an? audio fragment as media for "([^"]*)"$`, theAdminUploadsAudioMediaFor)
+	sc.Step(`^the admin removes the media for "([^"]*)"$`, theAdminRemovesMediaFor)
+	sc.Step(`^uploading an oversized image for "([^"]*)" should fail with status (\d+)$`, uploadingOverLimitImageMediaShouldFail)
+	sc.Step(`^uploading an unsupported media type for "([^"]*)" should fail with status (\d+)$`, uploadingUnsupportedMediaShouldFail)
+	sc.Step(`^"([^"]*)" should have (image|audio) media$`, theQuestionShouldHaveMediaType)
+	sc.Step(`^"([^"]*)" should have no media$`, theQuestionShouldHaveNoMedia)
+	sc.Step(`^"([^"]*)" should receive a "question\.started" message with (image|audio) media$`, shouldReceiveQuestionStartedWithMediaType)
+	sc.Step(`^uploading media for an unknown question should fail with status (\d+)$`, uploadingMediaForAnUnknownQuestionShouldFail)
 
 	sc.Step(`^I create a game for the quiz$`, iCreateAGameForTheQuiz)
 	sc.Step(`^"([^"]*)" joins the game$`, joinsTheGame)
@@ -64,6 +93,8 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^the game should have (\d+) players?$`, theGameShouldHaveNPlayers)
 	sc.Step(`^the admin kicks "([^"]*)"$`, theAdminKicks)
 	sc.Step(`^kicking "([^"]*)" should fail with status (\d+)$`, kickingShouldFailWithStatus)
+	sc.Step(`^kicking a player who never joined should fail with status (\d+)$`, kickingANonexistentPlayerShouldFail)
+	sc.Step(`^"([^"]*)" joins the game again with color "([^"]*)"$`, rejoinsTheGameWithColor)
 
 	sc.Step(`^"([^"]*)" connects to the game websocket$`, connectsToTheGameWebsocket)
 	sc.Step(`^"([^"]*)" reconnects to the game websocket$`, connectsToTheGameWebsocket)
@@ -78,6 +109,11 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^the admin resets the answers for question (\d+)$`, theAdminResetsAnswersForQuestionN)
 	sc.Step(`^resetting answers for question (\d+) should fail with status (\d+)$`, resettingAnswersForQuestionNShouldFailWithStatus)
 	sc.Step(`^the admin ends the game$`, theAdminEndsTheGame)
+	sc.Step(`^"([^"]*)" answers with a mismatched question id$`, answersWithAMismatchedQuestionID)
+	sc.Step(`^"([^"]*)" answers with an option that doesn't exist$`, answersWithANonexistentOption)
+	sc.Step(`^"([^"]*)" answers with an option on a free-text question$`, answersWithANonexistentOption)
+	sc.Step(`^"([^"]*)" submits free text on a multiple choice question$`, submitsFreeTextOnAMultipleChoiceQuestion)
+	sc.Step(`^the admin grades a nonexistent answer, expecting status (\d+)$`, theAdminGradesANonexistentAnswer)
 
 	sc.Step(`^"([^"]*)" should receive (?:a|an) "([^"]*)" message$`, shouldReceiveAMessage)
 	sc.Step(`^"([^"]*)" should receive a "question\.started" message with timed (true|false)$`, shouldReceiveQuestionStartedWithTimed)
@@ -93,6 +129,10 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 
 	sc.Step(`^the leaderboard should show "([^"]*)" with score (\d+)$`, theLeaderboardShouldShow)
 	sc.Step(`^the leaderboard should show "([^"]*)" with color "([^"]*)"$`, theLeaderboardShouldShowWithColor)
+
+	sc.Step(`^the public game lookup should show quiz "([^"]*)" and status "([^"]*)"$`, thePublicGameLookupShouldShow)
+	sc.Step(`^the public game lookup for code "([^"]*)" should fail with status (\d+)$`, thePublicGameLookupForCodeShouldFail)
+	sc.Step(`^the public leaderboard should show "([^"]*)" with score (\d+)$`, thePublicLeaderboardShouldShow)
 }
 
 // --- auth -------------------------------------------------------------
@@ -233,6 +273,453 @@ func theQuizShouldHaveNQuestions(ctx context.Context, want int) error {
 	got := len(resp.Body["questions"].([]any))
 	if got != want {
 		return fmt.Errorf("expected %d questions, got %d", want, got)
+	}
+	return nil
+}
+
+// iTryToAddAMultipleChoiceQuestionWithOptions exercises the rejection
+// path: a multiple_choice question needs at least 2 options.
+func iTryToAddAMultipleChoiceQuestionWithOptions(ctx context.Context, prompt string, table *godog.Table) error {
+	w := worldFromContext(ctx)
+	var options []map[string]any
+	for _, row := range table.Rows[1:] { // Rows[0] is the "text | correct" header
+		correct, err := strconv.ParseBool(row.Cells[1].Value)
+		if err != nil {
+			return fmt.Errorf("parsing 'correct' column %q: %w", row.Cells[1].Value, err)
+		}
+		options = append(options, map[string]any{"text": row.Cells[0].Value, "isCorrect": correct})
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{
+		"type":             "multiple_choice",
+		"prompt":           prompt,
+		"timeLimitSeconds": 30,
+		"points":           100,
+		"options":          options,
+	})
+	w.lastResponse = resp
+	return err
+}
+
+func iUpdateQuestionPromptAndPoints(ctx context.Context, oldPrompt, newPrompt string, points int) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[oldPrompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", oldPrompt)
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, qr.id)
+	resp, err := w.adminRequest(ctx, http.MethodPatch, path, map[string]any{"prompt": newPrompt, "points": points})
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 updating question, got %d: %v", resp.Status, resp.Body)
+	}
+	delete(w.questions, oldPrompt)
+	w.questions[newPrompt] = qr
+	return nil
+}
+
+func theQuestionShouldHavePoints(ctx context.Context, prompt string, wantPoints int) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[prompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", prompt)
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, qr.id)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	gotPrompt, _ := resp.Body["prompt"].(string)
+	if gotPrompt != prompt {
+		return fmt.Errorf("expected prompt %q, got %q", prompt, gotPrompt)
+	}
+	gotPoints := int(resp.Body["points"].(float64))
+	if gotPoints != wantPoints {
+		return fmt.Errorf("expected %d points, got %d", wantPoints, gotPoints)
+	}
+	return nil
+}
+
+func iDeleteTheQuestion(ctx context.Context, prompt string) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[prompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", prompt)
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, qr.id)
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusNoContent {
+		return fmt.Errorf("expected 204 deleting question, got %d: %v", resp.Status, resp.Body)
+	}
+	delete(w.questions, prompt)
+	return nil
+}
+
+// iReorderTheQuestionsTo builds a reorder request from the given prompts,
+// in order. A prompt this scenario never created resolves to a random
+// UUID instead of failing the step — that's exactly how the "mismatched
+// set of ids" rejection scenario exercises the endpoint, by naming an id
+// that doesn't belong to the quiz.
+func iReorderTheQuestionsTo(ctx context.Context, table *godog.Table) error {
+	w := worldFromContext(ctx)
+	ids := make([]string, len(table.Rows))
+	for i, row := range table.Rows {
+		if qr, ok := w.questions[row.Cells[0].Value]; ok {
+			ids[i] = qr.id
+		} else {
+			ids[i] = uuid.NewString()
+		}
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/order", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodPut, path, map[string]any{"questionIds": ids})
+	w.lastResponse = resp
+	return err
+}
+
+func theQuestionsShouldBeInOrder(ctx context.Context, table *godog.Table) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	questions, _ := resp.Body["questions"].([]any)
+	if len(questions) != len(table.Rows) {
+		return fmt.Errorf("expected %d questions, got %d", len(table.Rows), len(questions))
+	}
+	for i, row := range table.Rows {
+		want := row.Cells[0].Value
+		got, _ := questions[i].(map[string]any)["prompt"].(string)
+		if got != want {
+			return fmt.Errorf("position %d: expected %q, got %q", i, want, got)
+		}
+	}
+	return nil
+}
+
+func iUpdateTheQuizToTitleAndTimed(ctx context.Context, title, timedStr string) error {
+	w := worldFromContext(ctx)
+	timed, err := strconv.ParseBool(timedStr)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodPatch, path, map[string]any{"title": title, "timed": timed})
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 updating quiz, got %d: %v", resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func theQuizShouldBeTitledAndTimed(ctx context.Context, wantTitle, timedWord string) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	gotTitle, _ := resp.Body["title"].(string)
+	if gotTitle != wantTitle {
+		return fmt.Errorf("expected title %q, got %q", wantTitle, gotTitle)
+	}
+	wantTimed := timedWord == "timed"
+	gotTimed, _ := resp.Body["timed"].(bool)
+	if gotTimed != wantTimed {
+		return fmt.Errorf("expected timed=%v, got %v", wantTimed, gotTimed)
+	}
+	return nil
+}
+
+func iDeleteTheQuiz(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusNoContent {
+		return fmt.Errorf("expected 204 deleting quiz, got %d: %v", resp.Status, resp.Body)
+	}
+	return nil
+}
+
+// iTryToDeleteTheQuiz is iDeleteTheQuiz without asserting success — for
+// the rejection scenario, where deleting is expected to fail (see
+// Service.DeleteQuiz: a quiz with any game is ON DELETE RESTRICT).
+func iTryToDeleteTheQuiz(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	w.lastResponse = resp
+	return err
+}
+
+func gettingTheQuizShouldFailWithStatus(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d getting quiz, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func gettingAnUnknownQuizShouldFailWithStatus(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d getting an unknown quiz, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func theQuizListShouldInclude(ctx context.Context, titleA, titleB string) error {
+	w := worldFromContext(ctx)
+	resp, err := w.adminRequest(ctx, http.MethodGet, "/admin/quizzes", nil)
+	if err != nil {
+		return err
+	}
+	found := map[string]bool{}
+	for _, raw := range resp.RawList {
+		if title, _ := raw["title"].(string); title == titleA || title == titleB {
+			found[title] = true
+		}
+	}
+	if !found[titleA] || !found[titleB] {
+		return fmt.Errorf("expected quiz list to include %q and %q, got %v", titleA, titleB, resp.RawList)
+	}
+	return nil
+}
+
+func theGameListShouldIncludeThisGame(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.adminRequest(ctx, http.MethodGet, "/admin/games", nil)
+	if err != nil {
+		return err
+	}
+	for _, raw := range resp.RawList {
+		if id, _ := raw["id"].(string); id == w.gameID {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected game list to include %q, got %v", w.gameID, resp.RawList)
+}
+
+func theGameListFilteredByStatusShouldIncludeThisGame(ctx context.Context, status, verb string) error {
+	w := worldFromContext(ctx)
+	resp, err := w.adminRequest(ctx, http.MethodGet, "/admin/games?status="+status, nil)
+	if err != nil {
+		return err
+	}
+	present := false
+	for _, raw := range resp.RawList {
+		if id, _ := raw["id"].(string); id == w.gameID {
+			present = true
+		}
+	}
+	wantPresent := verb == "include"
+	if present != wantPresent {
+		return fmt.Errorf("filtering by status %q: expected present=%v, got %v (body: %v)", status, wantPresent, present, resp.RawList)
+	}
+	return nil
+}
+
+// --- question media -------------------------------------------------------
+
+func mediaPath(w *World, prompt string) (string, error) {
+	qr, ok := w.questions[prompt]
+	if !ok {
+		return "", fmt.Errorf("question %q was never created", prompt)
+	}
+	return fmt.Sprintf("/admin/quizzes/%s/questions/%s/media", w.quizID, qr.id), nil
+}
+
+func theAdminUploadsImageMediaFor(ctx context.Context, prompt string) error {
+	w := worldFromContext(ctx)
+	path, err := mediaPath(w, prompt)
+	if err != nil {
+		return err
+	}
+	resp, err := w.uploadMedia(ctx, path, "cover.png", "image/png", bytes.Repeat([]byte("img-bytes-"), 50))
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 uploading image media, got %d: %v", resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func theAdminUploadsAudioMediaFor(ctx context.Context, prompt string) error {
+	w := worldFromContext(ctx)
+	path, err := mediaPath(w, prompt)
+	if err != nil {
+		return err
+	}
+	resp, err := w.uploadMedia(ctx, path, "clip.mp3", "audio/mpeg", bytes.Repeat([]byte("audio-bytes-"), 50))
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 uploading audio media, got %d: %v", resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func theAdminRemovesMediaFor(ctx context.Context, prompt string) error {
+	w := worldFromContext(ctx)
+	path, err := mediaPath(w, prompt)
+	if err != nil {
+		return err
+	}
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 removing media, got %d: %v", resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func uploadingOverLimitImageMediaShouldFail(ctx context.Context, prompt string, want int) error {
+	w := worldFromContext(ctx)
+	path, err := mediaPath(w, prompt)
+	if err != nil {
+		return err
+	}
+	oversized := bytes.Repeat([]byte{0}, int(service.MaxImageMediaBytes)+1)
+	resp, err := w.uploadMedia(ctx, path, "big.png", "image/png", oversized)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d uploading oversized image, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func uploadingUnsupportedMediaShouldFail(ctx context.Context, prompt string, want int) error {
+	w := worldFromContext(ctx)
+	path, err := mediaPath(w, prompt)
+	if err != nil {
+		return err
+	}
+	resp, err := w.uploadMedia(ctx, path, "doc.pdf", "application/pdf", []byte("not an accepted media type"))
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d uploading unsupported media, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func uploadingMediaForAnUnknownQuestionShouldFail(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s/media", w.quizID, uuid.NewString())
+	resp, err := w.uploadMedia(ctx, path, "cover.png", "image/png", bytes.Repeat([]byte("img-"), 20))
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d uploading media for an unknown question, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+// theQuestionShouldHaveMediaType checks both the admin API's view of the
+// question and that mediaUrl is actually publicly fetchable — the whole
+// point of storing media in a public-read bucket is that a player's
+// browser can fetch it directly, with no auth and no backend round trip.
+func theQuestionShouldHaveMediaType(ctx context.Context, prompt, wantType string) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[prompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", prompt)
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, qr.id)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	got, _ := resp.Body["mediaType"].(string)
+	if got != wantType {
+		return fmt.Errorf("expected mediaType %q, got %q (body: %v)", wantType, got, resp.Body)
+	}
+	mediaURL, _ := resp.Body["mediaUrl"].(string)
+	if mediaURL == "" {
+		return fmt.Errorf("expected a mediaUrl, got none")
+	}
+	fetchResp, err := http.Get(mediaURL)
+	if err != nil {
+		return fmt.Errorf("fetching media URL %q: %w", mediaURL, err)
+	}
+	defer fetchResp.Body.Close()
+	if fetchResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected 200 fetching media URL %q, got %d", mediaURL, fetchResp.StatusCode)
+	}
+	return nil
+}
+
+func theQuestionShouldHaveNoMedia(ctx context.Context, prompt string) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[prompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", prompt)
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, qr.id)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if v, present := resp.Body["mediaUrl"]; present {
+		return fmt.Errorf("expected no mediaUrl, got %v", v)
+	}
+	return nil
+}
+
+func shouldReceiveQuestionStartedWithMediaType(ctx context.Context, nickname, wantType string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	env, err := p.waitFor(ctx, ws.TypeQuestionStarted, defaultWaitTimeout)
+	if err != nil {
+		return err
+	}
+	var qs ws.QuestionStarted
+	if err := json.Unmarshal(env.Payload, &qs); err != nil {
+		return err
+	}
+	if qs.MediaType == nil || string(*qs.MediaType) != wantType {
+		return fmt.Errorf("expected mediaType %q, got %v", wantType, qs.MediaType)
+	}
+	if qs.MediaURL == nil || *qs.MediaURL == "" {
+		return fmt.Errorf("expected a mediaUrl, got none")
 	}
 	return nil
 }
@@ -395,6 +882,47 @@ func kickPlayer(ctx context.Context, w *World, nickname string, wantStatus int) 
 	}
 	if resp.Status != wantStatus {
 		return fmt.Errorf("expected status %d kicking %q, got %d: %v", wantStatus, nickname, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+// kickingANonexistentPlayerShouldFail targets a client_id that never
+// joined this game at all (as opposed to kickingShouldFailWithStatus,
+// which targets a real player under the wrong game state).
+func kickingANonexistentPlayerShouldFail(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/games/%s/players/%s", w.gameID, uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d kicking a nonexistent player, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+// rejoinsTheGameWithColor is rejoinsTheGame plus a color, to check that
+// UpsertPlayer's ON CONFLICT clause updates color the same way it
+// already updates nickname.
+func rejoinsTheGameWithColor(ctx context.Context, nickname, color string) error {
+	w := worldFromContext(ctx)
+	existing, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q was never registered in this scenario", nickname)
+	}
+	resp, err := w.publicRequest(ctx, http.MethodPost, "/games/join", existing.clientID, map[string]any{
+		"code":     w.gameCode,
+		"nickname": nickname,
+		"color":    color,
+	})
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 rejoining as %q, got %d: %v", nickname, resp.Status, resp.Body)
 	}
 	return nil
 }
@@ -711,6 +1239,82 @@ func submitAnswer(ctx context.Context, p *player, optionText string) error {
 	return p.conn.Write(ctx, websocket.MessageText, raw)
 }
 
+// sendAnswerSubmitPayload sends a hand-built answer.submit payload,
+// bypassing optionIDFor's text-to-id lookup — used by the malformed/
+// invalid-submission steps below, which need to send ids optionIDFor
+// would never resolve to.
+func sendAnswerSubmitPayload(ctx context.Context, p *player, payload map[string]string) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	env := wsEnvelope{Type: ws.TypeAnswerSubmit, Payload: raw}
+	envRaw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return p.conn.Write(ctx, websocket.MessageText, envRaw)
+}
+
+// answersWithAMismatchedQuestionID sends a syntactically valid answer
+// (a real option from the actually-live question) but tagged with a
+// questionId that isn't the current question — SubmitAnswer rejects this
+// independently of whether the option itself would've been valid.
+func answersWithAMismatchedQuestionID(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if err := p.waitForCurrentQuestion(ctx, defaultWaitTimeout); err != nil {
+		return err
+	}
+	if len(p.currentQuestion.Options) == 0 {
+		return fmt.Errorf("player %q's current question has no options to reuse", nickname)
+	}
+	return sendAnswerSubmitPayload(ctx, p, map[string]string{
+		"questionId": uuid.NewString(),
+		"optionId":   p.currentQuestion.Options[0].ID,
+	})
+}
+
+// answersWithANonexistentOption tags the real, live questionId with an
+// optionId that doesn't resolve to anything — either because no such
+// option exists at all, or because the current question is free_text
+// and doesn't take an optionId in the first place.
+func answersWithANonexistentOption(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if err := p.waitForCurrentQuestion(ctx, defaultWaitTimeout); err != nil {
+		return err
+	}
+	return sendAnswerSubmitPayload(ctx, p, map[string]string{
+		"questionId": p.currentQuestion.QuestionID,
+		"optionId":   uuid.NewString(),
+	})
+}
+
+// submitsFreeTextOnAMultipleChoiceQuestion sends a "text" field to a
+// question that's actually multiple_choice, which has no text field at
+// all in SubmitAnswer's multiple_choice branch.
+func submitsFreeTextOnAMultipleChoiceQuestion(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if err := p.waitForCurrentQuestion(ctx, defaultWaitTimeout); err != nil {
+		return err
+	}
+	return sendAnswerSubmitPayload(ctx, p, map[string]string{
+		"questionId": p.currentQuestion.QuestionID,
+		"text":       "some free text",
+	})
+}
+
 func shouldReceiveAnAnswerResult(ctx context.Context, nickname, wantCorrectStr string, wantPoints int) error {
 	w := worldFromContext(ctx)
 	p, ok := w.players[nickname]
@@ -844,6 +1448,19 @@ func theAdminGradesAnswerAs(ctx context.Context, nickname, questionPrompt, verdi
 	return nil
 }
 
+func theAdminGradesANonexistentAnswer(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/games/%s/answers/%s/grade", w.gameID, uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{"correct": true})
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d grading a nonexistent answer, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
 func theLeaderboardShouldShow(ctx context.Context, nickname string, wantScore int) error {
 	w := worldFromContext(ctx)
 	path := fmt.Sprintf("/admin/games/%s/leaderboard", w.gameID)
@@ -883,4 +1500,66 @@ func theLeaderboardShouldShowWithColor(ctx context.Context, nickname, wantColor 
 		}
 	}
 	return fmt.Errorf("no leaderboard entry for %q", nickname)
+}
+
+// --- public lookup -------------------------------------------------------
+//
+// GET /games/{code} and /games/{code}/leaderboard are unauthenticated —
+// what a player's join screen calls to show a quiz name before they
+// commit to joining, or to poll standings without a websocket.
+
+func thePublicGameLookupShouldShow(ctx context.Context, wantTitle, wantStatus string) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/games/%s", w.gameCode)
+	resp, err := w.publicRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 looking up game %q, got %d: %v", w.gameCode, resp.Status, resp.Body)
+	}
+	if got, _ := resp.Body["quizTitle"].(string); got != wantTitle {
+		return fmt.Errorf("expected quizTitle %q, got %q", wantTitle, got)
+	}
+	if got, _ := resp.Body["status"].(string); got != wantStatus {
+		return fmt.Errorf("expected status %q, got %q", wantStatus, got)
+	}
+	return nil
+}
+
+func thePublicGameLookupForCodeShouldFail(ctx context.Context, code string, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/games/%s", code)
+	resp, err := w.publicRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d looking up code %q, got %d: %v", want, code, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func thePublicLeaderboardShouldShow(ctx context.Context, nickname string, wantScore int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/games/%s/leaderboard", w.gameCode)
+	resp, err := w.publicRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 fetching public leaderboard, got %d: %v", resp.Status, resp.Body)
+	}
+	entries, _ := resp.Body["entries"].([]any)
+	for _, raw := range entries {
+		entry := raw.(map[string]any)
+		if entry["nickname"] == nickname {
+			got := int(entry["score"].(float64))
+			if got != wantScore {
+				return fmt.Errorf("expected %q to have score %d, got %d", nickname, wantScore, got)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no public leaderboard entry for %q", nickname)
 }

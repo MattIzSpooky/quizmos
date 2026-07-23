@@ -12,10 +12,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearQuestionMedia = `-- name: ClearQuestionMedia :one
+UPDATE questions
+SET media_key = NULL, media_type = NULL, updated_at = now()
+WHERE id = $1 AND quiz_id = $2
+RETURNING id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type
+`
+
+type ClearQuestionMediaParams struct {
+	ID     uuid.UUID `json:"id"`
+	QuizID uuid.UUID `json:"quiz_id"`
+}
+
+func (q *Queries) ClearQuestionMedia(ctx context.Context, arg ClearQuestionMediaParams) (Question, error) {
+	row := q.db.QueryRow(ctx, clearQuestionMedia, arg.ID, arg.QuizID)
+	var i Question
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.Type,
+		&i.Prompt,
+		&i.Position,
+		&i.TimeLimitSeconds,
+		&i.Points,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MediaKey,
+		&i.MediaType,
+	)
+	return i, err
+}
+
 const createQuestion = `-- name: CreateQuestion :one
 INSERT INTO questions (quiz_id, type, prompt, position, time_limit_seconds, points)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at
+RETURNING id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type
 `
 
 type CreateQuestionParams struct {
@@ -47,6 +78,8 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		&i.Points,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MediaKey,
+		&i.MediaType,
 	)
 	return i, err
 }
@@ -126,7 +159,7 @@ func (q *Queries) GetOption(ctx context.Context, id uuid.UUID) (QuestionOption, 
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at FROM questions WHERE id = $1 AND quiz_id = $2
+SELECT id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type FROM questions WHERE id = $1 AND quiz_id = $2
 `
 
 type GetQuestionParams struct {
@@ -147,12 +180,14 @@ func (q *Queries) GetQuestion(ctx context.Context, arg GetQuestionParams) (Quest
 		&i.Points,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MediaKey,
+		&i.MediaType,
 	)
 	return i, err
 }
 
 const getQuestionByID = `-- name: GetQuestionByID :one
-SELECT id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at FROM questions WHERE id = $1
+SELECT id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type FROM questions WHERE id = $1
 `
 
 func (q *Queries) GetQuestionByID(ctx context.Context, id uuid.UUID) (Question, error) {
@@ -168,6 +203,8 @@ func (q *Queries) GetQuestionByID(ctx context.Context, id uuid.UUID) (Question, 
 		&i.Points,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MediaKey,
+		&i.MediaType,
 	)
 	return i, err
 }
@@ -233,7 +270,7 @@ func (q *Queries) ListOptionsByQuestionIDs(ctx context.Context, questionIds []uu
 }
 
 const listQuestionsByQuiz = `-- name: ListQuestionsByQuiz :many
-SELECT id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at FROM questions WHERE quiz_id = $1 ORDER BY position ASC
+SELECT id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type FROM questions WHERE quiz_id = $1 ORDER BY position ASC
 `
 
 func (q *Queries) ListQuestionsByQuiz(ctx context.Context, quizID uuid.UUID) ([]Question, error) {
@@ -255,6 +292,8 @@ func (q *Queries) ListQuestionsByQuiz(ctx context.Context, quizID uuid.UUID) ([]
 			&i.Points,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MediaKey,
+			&i.MediaType,
 		); err != nil {
 			return nil, err
 		}
@@ -275,6 +314,44 @@ func (q *Queries) NextQuestionPosition(ctx context.Context, quizID uuid.UUID) (i
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const setQuestionMedia = `-- name: SetQuestionMedia :one
+UPDATE questions
+SET media_key = $3, media_type = $4, updated_at = now()
+WHERE id = $1 AND quiz_id = $2
+RETURNING id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type
+`
+
+type SetQuestionMediaParams struct {
+	ID        uuid.UUID   `json:"id"`
+	QuizID    uuid.UUID   `json:"quiz_id"`
+	MediaKey  pgtype.Text `json:"media_key"`
+	MediaType pgtype.Text `json:"media_type"`
+}
+
+func (q *Queries) SetQuestionMedia(ctx context.Context, arg SetQuestionMediaParams) (Question, error) {
+	row := q.db.QueryRow(ctx, setQuestionMedia,
+		arg.ID,
+		arg.QuizID,
+		arg.MediaKey,
+		arg.MediaType,
+	)
+	var i Question
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.Type,
+		&i.Prompt,
+		&i.Position,
+		&i.TimeLimitSeconds,
+		&i.Points,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MediaKey,
+		&i.MediaType,
+	)
+	return i, err
 }
 
 const setQuestionPosition = `-- name: SetQuestionPosition :exec
@@ -299,7 +376,7 @@ SET prompt             = COALESCE($1, prompt),
     points              = COALESCE($3, points),
     updated_at          = now()
 WHERE id = $4 AND quiz_id = $5
-RETURNING id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at
+RETURNING id, quiz_id, type, prompt, position, time_limit_seconds, points, created_at, updated_at, media_key, media_type
 `
 
 type UpdateQuestionParams struct {
@@ -329,6 +406,8 @@ func (q *Queries) UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) 
 		&i.Points,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MediaKey,
+		&i.MediaType,
 	)
 	return i, err
 }

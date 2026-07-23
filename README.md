@@ -2,14 +2,16 @@
 
 A live trivia/pub-quiz app: an admin runs a quiz from a control panel and
 players join on their phones with a code (or a QR scan) and answer
-multiple-choice questions in real time. No player registration — a
-`client_id` is minted in the browser on first visit and that's their whole
-identity for the game.
+multiple-choice or free-text questions in real time, optionally with an
+image or audio fragment attached. No player registration — a `client_id`
+is minted in the browser on first visit and that's their whole identity
+for the game.
 
 - **Backend:** Go, chi router, Postgres (sqlc), websockets for live gameplay
 - **Frontend:** React Router (framework mode), Tailwind v4
 - **Auth:** Keycloak (OIDC/JWT) for the admin side only — players need no
   account at all
+- **Media storage:** MinIO/S3 for question images and audio fragments
 - **Spec-first codegen:** REST from OpenAPI (oapi-codegen + openapi-typescript),
   websocket payloads from AsyncAPI (quicktype)
 
@@ -18,11 +20,12 @@ identity for the game.
 - Anyone can **join** a game by its 6-character code while it's in the
   lobby. Once the host starts the game, new joins are rejected.
 - The **admin** authenticates via Keycloak (realm role `quiz-admin`),
-  authors quizzes (multiple-choice questions, optionally timed), creates
+  authors quizzes (multiple-choice or free-text questions, optionally
+  timed, optionally with an image or audio fragment attached), creates
   games from them, and runs the live session: start, advance, end, kick
   players from the lobby, review any earlier question read-only without
-  disturbing live play, or reset a question's answers if something went
-  wrong.
+  disturbing live play, reset a question's answers if something went
+  wrong, or grade free-text answers by hand.
 - Gameplay itself — question start/end, answer submission, scoring,
   leaderboard, presence — is driven entirely over a single websocket
   channel per game, described by `api/asyncapi.yaml`.
@@ -36,15 +39,15 @@ api/        OpenAPI (REST) and AsyncAPI (websocket) specs — the source of trut
 backend/    Go server: chi handlers, service layer, sqlc queries, websocket hub
 frontend/   React Router app: player join/play screens, admin console
 tools/      Node-side codegen helpers (AsyncAPI → quicktype bridge)
-deploy/     docker-compose for local Postgres + Keycloak
+deploy/     Keycloak realm import used by both docker-compose.yml and the e2e suite
 ```
 
 ## Prerequisites
 
 - Go (see `backend/go.mod` for the version)
 - Node.js + npm
-- Docker (for local Postgres/Keycloak, and for the e2e test suite, which
-  spins up real containers via testcontainers-go)
+- Docker (for local Postgres/Keycloak/MinIO, and for the e2e test suite,
+  which spins up real containers via testcontainers-go)
 - `make`
 
 ## Getting started
@@ -53,7 +56,7 @@ deploy/     docker-compose for local Postgres + Keycloak
 # 1. Install codegen tools and JS dependencies
 make tools
 
-# 2. Start Postgres + Keycloak
+# 2. Start Postgres + Keycloak + MinIO
 make dev-up
 
 # 3. Apply database migrations
@@ -73,8 +76,9 @@ with the seeded Keycloak user `admin@quizmos.dev` / `quizmos-dev` (from
 
 For a quick demo, or anywhere you'd rather not install Go/Node locally,
 `docker-compose.yml` at the repo root runs everything — Postgres,
-Keycloak, a one-shot migration job, the backend, and the frontend — built
-from `backend/Dockerfile` and `frontend/Dockerfile` (both multi-stage):
+Keycloak, MinIO, a one-shot migration job, the backend, and the frontend —
+built from `backend/Dockerfile` and `frontend/Dockerfile` (both
+multi-stage):
 
 ```bash
 make demo-up      # builds images and starts the whole stack in the background
@@ -84,8 +88,8 @@ make demo-down    # tears it down
 Once it's up, the frontend is at `http://localhost:5173` and the backend
 at `http://localhost:8080`, same as local dev — sign in with the same
 seeded Keycloak user. `make dev-up`/`dev-down` remain for the
-Postgres+Keycloak-only workflow above, if you'd rather run the backend and
-frontend natively while iterating.
+infra-only workflow above, if you'd rather run the backend and frontend
+natively while iterating.
 
 ## Code generation
 
@@ -120,11 +124,14 @@ make test-e2e      # Gherkin/godog e2e suite (needs a reachable Docker daemon)
 ```
 
 The e2e suite (`backend/features/*.feature`, driven by `backend/e2e`) boots
-real Postgres and Keycloak containers and drives the actual HTTP and
-websocket server end to end — no mocks. Feature coverage includes quiz
-authoring, game lifecycle (joining, kicking, reconnecting), live gameplay
-and scoring, question navigation (going back/reviewing), per-quiz timing,
-and resetting a question's answers.
+real Postgres, Keycloak, and MinIO containers and drives the actual HTTP
+and websocket server end to end — no mocks. Feature coverage includes quiz
+authoring, question media (image/audio upload, size/type limits), game
+lifecycle (joining, kicking, reconnecting), live gameplay and scoring
+(multiple-choice and free-text, including manual grading), question
+navigation (going back/reviewing, including resuming with an
+already-submitted answer intact), per-quiz timing, resetting a question's
+answers, and player color choices.
 
 If your Docker daemon isn't at the default socket (e.g. Docker Desktop),
 point `DOCKER_HOST` at it first:
@@ -150,6 +157,12 @@ The backend reads its configuration from environment variables:
 | `KEYCLOAK_ISSUER`  | `http://localhost:8081/realms/quizmos`        | Keycloak realm issuer URL             |
 | `ADMIN_ROLE`       | `quiz-admin`                                  | Realm role required for admin routes  |
 | `FRONTEND_ORIGIN`  | `http://localhost:5173`                       | Allowed CORS origin                   |
+| `S3_ENDPOINT`      | `localhost:9000`                              | MinIO/S3 endpoint the backend uploads question media to (host:port, no scheme) |
+| `S3_ACCESS_KEY`    | `minioadmin`                                  | MinIO/S3 access key                   |
+| `S3_SECRET_KEY`    | `minioadmin`                                  | MinIO/S3 secret key                   |
+| `S3_BUCKET`        | `quizmos-media`                               | Bucket question media is stored in (created automatically, made public-read) |
+| `S3_USE_SSL`       | `false`                                       | Whether to use HTTPS talking to `S3_ENDPOINT` |
+| `S3_PUBLIC_URL`    | `http://localhost:9000`                       | Base URL baked into media URLs returned to clients — usually a different address than `S3_ENDPOINT`, since browsers fetch media directly, not through the backend |
 
 The frontend reads these at build/dev time (Vite `import.meta.env`):
 

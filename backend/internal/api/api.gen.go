@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path"
@@ -38,6 +39,24 @@ func (e GameStatus) Valid() bool {
 	case InProgress:
 		return true
 	case Lobby:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MediaType.
+const (
+	Audio MediaType = "audio"
+	Image MediaType = "image"
+)
+
+// Valid indicates whether the value is a known member of the MediaType enum.
+func (e MediaType) Valid() bool {
+	switch e {
+	case Audio:
+		return true
+	case Image:
 		return true
 	default:
 		return false
@@ -220,6 +239,9 @@ type LeaderboardEntry struct {
 	Score    int         `json:"score"`
 }
 
+// MediaType defines model for MediaType.
+type MediaType string
+
 // PlayerColor A small, curated set of cosmos-themed color choices — not a full color picker — so every player's pick reads clearly against the dark theme and stays distinct from the app's own semantic colors.
 type PlayerColor string
 
@@ -233,7 +255,11 @@ type PublicGame struct {
 
 // Question defines model for Question.
 type Question struct {
-	Id               openapi_types.UUID         `json:"id"`
+	Id        openapi_types.UUID `json:"id"`
+	MediaType *MediaType         `json:"mediaType,omitempty"`
+
+	// MediaUrl Absent when the question has no attached media.
+	MediaUrl         *string                    `json:"mediaUrl,omitempty"`
 	Options          []QuestionOptionWithAnswer `json:"options"`
 	Points           int                        `json:"points"`
 	Position         int                        `json:"position"`
@@ -318,6 +344,9 @@ type UpdateQuizRequest struct {
 	Title       *string `json:"title,omitempty"`
 }
 
+// Authorization defines model for Authorization.
+type Authorization = string
+
 // ClientId defines model for ClientId.
 type ClientId = openapi_types.UUID
 
@@ -351,6 +380,23 @@ type Unauthorized = Error
 // ListGamesParams defines parameters for ListGames.
 type ListGamesParams struct {
 	Status *GameStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// DeleteQuestionMediaParams defines parameters for DeleteQuestionMedia.
+type DeleteQuestionMediaParams struct {
+	// Authorization "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage.
+	Authorization Authorization `json:"Authorization"`
+}
+
+// UploadQuestionMediaMultipartBody defines parameters for UploadQuestionMedia.
+type UploadQuestionMediaMultipartBody struct {
+	File openapi_types.File `json:"file"`
+}
+
+// UploadQuestionMediaParams defines parameters for UploadQuestionMedia.
+type UploadQuestionMediaParams struct {
+	// Authorization "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage.
+	Authorization Authorization `json:"Authorization"`
 }
 
 // JoinGameParams defines parameters for JoinGame.
@@ -389,6 +435,9 @@ type ReorderQuestionsJSONRequestBody = ReorderQuestionsRequest
 
 // UpdateQuestionJSONRequestBody defines body for UpdateQuestion for application/json ContentType.
 type UpdateQuestionJSONRequestBody = UpdateQuestionRequest
+
+// UploadQuestionMediaMultipartRequestBody defines body for UploadQuestionMedia for multipart/form-data ContentType.
+type UploadQuestionMediaMultipartRequestBody UploadQuestionMediaMultipartBody
 
 // JoinGameJSONRequestBody defines body for JoinGame for application/json ContentType.
 type JoinGameJSONRequestBody = JoinGameRequest
@@ -437,7 +486,7 @@ type ServerInterface interface {
 	// CreateQuiz Create a quiz
 	// (POST /admin/quizzes)
 	CreateQuiz(w http.ResponseWriter, r *http.Request)
-	// DeleteQuiz Delete a quiz
+	// DeleteQuiz Delete a quiz and its questions. Rejected with 409 if any game has ever been created from it (lobby, in-progress, or ended) — a game is a historical record of a play session and shouldn't silently lose the quiz it was played from.
 	// (DELETE /admin/quizzes/{quizId})
 	DeleteQuiz(w http.ResponseWriter, r *http.Request, quizId QuizId)
 	// GetQuiz Get a quiz with its questions
@@ -464,6 +513,12 @@ type ServerInterface interface {
 	// UpdateQuestion Update a question
 	// (PATCH /admin/quizzes/{quizId}/questions/{questionId})
 	UpdateQuestion(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId)
+	// DeleteQuestionMedia Remove a question's attached media, if any. Uses the same manual Authorization check as the upload operation, for consistency between the two.
+	// (DELETE /admin/quizzes/{quizId}/questions/{questionId}/media)
+	DeleteQuestionMedia(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId, params DeleteQuestionMediaParams)
+	// UploadQuestionMedia Attach an optional image or audio fragment to a question, replacing any existing media. Shown to players when the question starts, and to the admin during the live game (to play audio centrally or reference the image while giving a hint). Requires an admin bearer token (see the Authorization parameter) — not secured via the usual bearerAuth scheme, since standard request validation would consume the multipart body before the handler can stream it to storage.
+	// (POST /admin/quizzes/{quizId}/questions/{questionId}/media)
+	UploadQuestionMedia(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId, params UploadQuestionMediaParams)
 	// JoinGame Join a game by its join code. Only allowed while the game is in the lobby — once it's in progress or has ended, this returns 409.
 	// (POST /games/join)
 	JoinGame(w http.ResponseWriter, r *http.Request, params JoinGameParams)
@@ -563,7 +618,7 @@ func (_ Unimplemented) CreateQuiz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// DeleteQuiz Delete a quiz
+// DeleteQuiz Delete a quiz and its questions. Rejected with 409 if any game has ever been created from it (lobby, in-progress, or ended) — a game is a historical record of a play session and shouldn't silently lose the quiz it was played from.
 // (DELETE /admin/quizzes/{quizId})
 func (_ Unimplemented) DeleteQuiz(w http.ResponseWriter, r *http.Request, quizId QuizId) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -614,6 +669,18 @@ func (_ Unimplemented) GetQuestion(w http.ResponseWriter, r *http.Request, quizI
 // UpdateQuestion Update a question
 // (PATCH /admin/quizzes/{quizId}/questions/{questionId})
 func (_ Unimplemented) UpdateQuestion(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteQuestionMedia Remove a question's attached media, if any. Uses the same manual Authorization check as the upload operation, for consistency between the two.
+// (DELETE /admin/quizzes/{quizId}/questions/{questionId}/media)
+func (_ Unimplemented) DeleteQuestionMedia(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId, params DeleteQuestionMediaParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UploadQuestionMedia Attach an optional image or audio fragment to a question, replacing any existing media. Shown to players when the question starts, and to the admin during the live game (to play audio centrally or reference the image while giving a hint). Requires an admin bearer token (see the Authorization parameter) — not secured via the usual bearerAuth scheme, since standard request validation would consume the multipart body before the handler can stream it to storage.
+// (POST /admin/quizzes/{quizId}/questions/{questionId}/media)
+func (_ Unimplemented) UploadQuestionMedia(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId, params UploadQuestionMediaParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1267,6 +1334,132 @@ func (siw *ServerInterfaceWrapper) UpdateQuestion(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteQuestionMedia operation middleware
+func (siw *ServerInterfaceWrapper) DeleteQuestionMedia(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "quizId" -------------
+	var quizId QuizId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "quizId", chi.URLParam(r, "quizId"), &quizId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "quizId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "questionId" -------------
+	var questionId QuestionId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "questionId", chi.URLParam(r, "questionId"), &questionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "questionId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteQuestionMediaParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Authorization", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Authorization", Err: err})
+			return
+		}
+
+		params.Authorization = Authorization
+
+	} else {
+		err := fmt.Errorf("Header parameter Authorization is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Authorization", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteQuestionMedia(w, r, quizId, questionId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UploadQuestionMedia operation middleware
+func (siw *ServerInterfaceWrapper) UploadQuestionMedia(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "quizId" -------------
+	var quizId QuizId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "quizId", chi.URLParam(r, "quizId"), &quizId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "quizId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "questionId" -------------
+	var questionId QuestionId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "questionId", chi.URLParam(r, "questionId"), &questionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "questionId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UploadQuestionMediaParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization Authorization
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Authorization", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Authorization", Err: err})
+			return
+		}
+
+		params.Authorization = Authorization
+
+	} else {
+		err := fmt.Errorf("Header parameter Authorization is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Authorization", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadQuestionMedia(w, r, quizId, questionId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // JoinGame operation middleware
 func (siw *ServerInterfaceWrapper) JoinGame(w http.ResponseWriter, r *http.Request) {
 
@@ -1533,6 +1726,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/admin/quizzes/{quizId}/questions/{questionId}", wrapper.UpdateQuestion)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/admin/quizzes/{quizId}/questions/{questionId}/media", wrapper.DeleteQuestionMedia)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/quizzes/{quizId}/questions/{questionId}/media", wrapper.UploadQuestionMedia)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/games", wrapper.ListGames)
@@ -2630,6 +2829,20 @@ func (response DeleteQuiz404JSONResponse) VisitDeleteQuizResponse(w http.Respons
 	return err
 }
 
+type DeleteQuiz409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteQuiz409JSONResponse) VisitDeleteQuizResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetQuizRequestObject struct {
 	QuizId QuizId `json:"quizId"`
 }
@@ -3185,6 +3398,153 @@ func (response UpdateQuestion404JSONResponse) VisitUpdateQuestionResponse(w http
 	return err
 }
 
+type DeleteQuestionMediaRequestObject struct {
+	QuizId     QuizId     `json:"quizId"`
+	QuestionId QuestionId `json:"questionId"`
+	Params     DeleteQuestionMediaParams
+}
+
+type DeleteQuestionMediaResponseObject interface {
+	VisitDeleteQuestionMediaResponse(w http.ResponseWriter) error
+}
+
+type DeleteQuestionMedia200JSONResponse Question
+
+func (response DeleteQuestionMedia200JSONResponse) VisitDeleteQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteQuestionMedia401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeleteQuestionMedia401JSONResponse) VisitDeleteQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteQuestionMedia403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteQuestionMedia403JSONResponse) VisitDeleteQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteQuestionMedia404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteQuestionMedia404JSONResponse) VisitDeleteQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadQuestionMediaRequestObject struct {
+	QuizId     QuizId     `json:"quizId"`
+	QuestionId QuestionId `json:"questionId"`
+	Params     UploadQuestionMediaParams
+	Body       *multipart.Reader
+}
+
+type UploadQuestionMediaResponseObject interface {
+	VisitUploadQuestionMediaResponse(w http.ResponseWriter) error
+}
+
+type UploadQuestionMedia200JSONResponse Question
+
+func (response UploadQuestionMedia200JSONResponse) VisitUploadQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadQuestionMedia400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UploadQuestionMedia400JSONResponse) VisitUploadQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadQuestionMedia401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response UploadQuestionMedia401JSONResponse) VisitUploadQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadQuestionMedia403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UploadQuestionMedia403JSONResponse) VisitUploadQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadQuestionMedia404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UploadQuestionMedia404JSONResponse) VisitUploadQuestionMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type JoinGameRequestObject struct {
 	Params JoinGameParams
 	Body   *JoinGameJSONRequestBody
@@ -3367,7 +3727,7 @@ type StrictServerInterface interface {
 	// CreateQuiz Create a quiz
 	// (POST /admin/quizzes)
 	CreateQuiz(ctx context.Context, request CreateQuizRequestObject) (CreateQuizResponseObject, error)
-	// DeleteQuiz Delete a quiz
+	// DeleteQuiz Delete a quiz and its questions. Rejected with 409 if any game has ever been created from it (lobby, in-progress, or ended) — a game is a historical record of a play session and shouldn't silently lose the quiz it was played from.
 	// (DELETE /admin/quizzes/{quizId})
 	DeleteQuiz(ctx context.Context, request DeleteQuizRequestObject) (DeleteQuizResponseObject, error)
 	// GetQuiz Get a quiz with its questions
@@ -3394,6 +3754,12 @@ type StrictServerInterface interface {
 	// UpdateQuestion Update a question
 	// (PATCH /admin/quizzes/{quizId}/questions/{questionId})
 	UpdateQuestion(ctx context.Context, request UpdateQuestionRequestObject) (UpdateQuestionResponseObject, error)
+	// DeleteQuestionMedia Remove a question's attached media, if any. Uses the same manual Authorization check as the upload operation, for consistency between the two.
+	// (DELETE /admin/quizzes/{quizId}/questions/{questionId}/media)
+	DeleteQuestionMedia(ctx context.Context, request DeleteQuestionMediaRequestObject) (DeleteQuestionMediaResponseObject, error)
+	// UploadQuestionMedia Attach an optional image or audio fragment to a question, replacing any existing media. Shown to players when the question starts, and to the admin during the live game (to play audio centrally or reference the image while giving a hint). Requires an admin bearer token (see the Authorization parameter) — not secured via the usual bearerAuth scheme, since standard request validation would consume the multipart body before the handler can stream it to storage.
+	// (POST /admin/quizzes/{quizId}/questions/{questionId}/media)
+	UploadQuestionMedia(ctx context.Context, request UploadQuestionMediaRequestObject) (UploadQuestionMediaResponseObject, error)
 	// JoinGame Join a game by its join code. Only allowed while the game is in the lobby — once it's in progress or has ended, this returns 409.
 	// (POST /games/join)
 	JoinGame(ctx context.Context, request JoinGameRequestObject) (JoinGameResponseObject, error)
@@ -4105,6 +4471,69 @@ func (sh *strictHandler) UpdateQuestion(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// DeleteQuestionMedia operation middleware
+func (sh *strictHandler) DeleteQuestionMedia(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId, params DeleteQuestionMediaParams) {
+	var request DeleteQuestionMediaRequestObject
+
+	request.QuizId = quizId
+	request.QuestionId = questionId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteQuestionMedia(ctx, request.(DeleteQuestionMediaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteQuestionMedia")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteQuestionMediaResponseObject); ok {
+		if err := validResponse.VisitDeleteQuestionMediaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UploadQuestionMedia operation middleware
+func (sh *strictHandler) UploadQuestionMedia(w http.ResponseWriter, r *http.Request, quizId QuizId, questionId QuestionId, params UploadQuestionMediaParams) {
+	var request UploadQuestionMediaRequestObject
+
+	request.QuizId = quizId
+	request.QuestionId = questionId
+	request.Params = params
+
+	if reader, err := r.MultipartReader(); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode multipart body: %w", err))
+		return
+	} else {
+		request.Body = reader
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UploadQuestionMedia(ctx, request.(UploadQuestionMediaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UploadQuestionMedia")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UploadQuestionMediaResponseObject); ok {
+		if err := validResponse.VisitUploadQuestionMediaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // JoinGame operation middleware
 func (sh *strictHandler) JoinGame(w http.ResponseWriter, r *http.Request, params JoinGameParams) {
 	var request JoinGameRequestObject
@@ -4196,72 +4625,84 @@ func (sh *strictHandler) GetPublicLeaderboard(w http.ResponseWriter, r *http.Req
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"QtPjcHb9vwEAAP//",
+	"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",
+	"6/8NAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

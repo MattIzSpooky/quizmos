@@ -46,3 +46,10 @@ Feature: Free-text questions
   Scenario: A free-text answer over 500 characters is rejected
     When "Alice" submits an over-length free-text answer
     Then "Alice" should receive an "error" message
+
+  Scenario: Submitting an option to a free-text question is rejected
+    When "Alice" answers with an option on a free-text question
+    Then "Alice" should receive an "error" message
+
+  Scenario: Grading an answer that doesn't exist fails
+    Then the admin grades a nonexistent answer, expecting status 404

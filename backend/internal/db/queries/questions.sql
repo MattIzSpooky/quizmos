@@ -27,6 +27,18 @@ RETURNING *;
 -- name: SetQuestionPosition :exec
 UPDATE questions SET position = $3 WHERE id = $1 AND quiz_id = $2;
 
+-- name: SetQuestionMedia :one
+UPDATE questions
+SET media_key = $3, media_type = $4, updated_at = now()
+WHERE id = $1 AND quiz_id = $2
+RETURNING *;
+
+-- name: ClearQuestionMedia :one
+UPDATE questions
+SET media_key = NULL, media_type = NULL, updated_at = now()
+WHERE id = $1 AND quiz_id = $2
+RETURNING *;
+
 -- name: DeleteQuestion :execrows
 DELETE FROM questions WHERE id = $1 AND quiz_id = $2;
 

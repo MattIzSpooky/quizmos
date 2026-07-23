@@ -165,12 +165,22 @@ export interface AnswerCount {
 export interface QuestionReviewed {
     answerCounts:     AnswerCount[];
     correctOptionId?: string;
-    options:          QuestionOption[];
-    prompt:           string;
-    questionId:       string;
-    questionIndex:    number;
-    totalQuestions:   number;
+    mediaType?:       MediaType;
+    /**
+     * Absent when the question has no attached media.
+     */
+    mediaUrl?:      string;
+    options:        QuestionOption[];
+    prompt:         string;
+    questionId:     string;
+    questionIndex:  number;
+    totalQuestions: number;
     [property: string]: any;
+}
+
+export enum MediaType {
+    Audio = "audio",
+    Image = "image",
 }
 
 export interface QuestionOption {
@@ -180,6 +190,11 @@ export interface QuestionOption {
 }
 
 export interface QuestionStarted {
+    mediaType?: MediaType;
+    /**
+     * Absent when the question has no attached media.
+     */
+    mediaUrl?:     string;
     options:       QuestionOption[];
     prompt:        string;
     questionId:    string;
@@ -608,6 +623,8 @@ const typeMap: any = {
     "QuestionReviewed": o([
         { json: "answerCounts", js: "answerCounts", typ: a(r("AnswerCount")) },
         { json: "correctOptionId", js: "correctOptionId", typ: u(undefined, "") },
+        { json: "mediaType", js: "mediaType", typ: u(undefined, r("MediaType")) },
+        { json: "mediaUrl", js: "mediaUrl", typ: u(undefined, "") },
         { json: "options", js: "options", typ: a(r("QuestionOption")) },
         { json: "prompt", js: "prompt", typ: "" },
         { json: "questionId", js: "questionId", typ: "" },
@@ -619,6 +636,8 @@ const typeMap: any = {
         { json: "text", js: "text", typ: "" },
     ], "any"),
     "QuestionStarted": o([
+        { json: "mediaType", js: "mediaType", typ: u(undefined, r("MediaType")) },
+        { json: "mediaUrl", js: "mediaUrl", typ: u(undefined, "") },
         { json: "options", js: "options", typ: a(r("QuestionOption")) },
         { json: "prompt", js: "prompt", typ: "" },
         { json: "questionId", js: "questionId", typ: "" },
@@ -643,6 +662,10 @@ const typeMap: any = {
         "nova",
         "quasar",
         "solar",
+    ],
+    "MediaType": [
+        "audio",
+        "image",
     ],
     "Type": [
         "free_text",

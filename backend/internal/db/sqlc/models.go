@@ -53,6 +53,8 @@ type Question struct {
 	Points           int32              `json:"points"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	MediaKey         pgtype.Text        `json:"media_key"`
+	MediaType        pgtype.Text        `json:"media_type"`
 }
 
 type QuestionOption struct {

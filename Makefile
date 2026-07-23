@@ -19,7 +19,7 @@ help:
 	@echo "  make migrate-up         apply database migrations"
 	@echo "  make migrate-down       roll back the last migration"
 	@echo "  make migrate-new name=add_foo   scaffold a new migration pair"
-	@echo "  make dev-up / dev-down  start/stop local Postgres + Keycloak only, for native go run/npm run dev"
+	@echo "  make dev-up / dev-down  start/stop local Postgres + Keycloak + MinIO, for native go run/npm run dev"
 	@echo "  make run-backend        run the Go backend"
 	@echo "  make run-frontend       run the React dev server"
 	@echo "  make build              build backend binary + frontend production bundle"
@@ -93,18 +93,19 @@ migrate-new:
 # ---------------------------------------------------------------------------
 # Local dev environment
 #
-# dev-up/dev-down bring up just the infra (Postgres + Keycloak) for running
-# the backend/frontend natively via `go run`/`npm run dev`. demo-up/demo-down
-# run the whole stack in containers instead — see docker-compose.yml.
+# dev-up/dev-down bring up just the infra (Postgres + Keycloak + MinIO)
+# for running the backend/frontend natively via `go run`/`npm run dev`.
+# demo-up/demo-down run the whole stack in containers instead — see
+# docker-compose.yml.
 # ---------------------------------------------------------------------------
 
 .PHONY: dev-up
 dev-up:
-	docker compose up -d postgres keycloak
+	docker compose up -d postgres keycloak minio
 
 .PHONY: dev-down
 dev-down:
-	docker compose stop postgres keycloak
+	docker compose stop postgres keycloak minio
 
 .PHONY: demo-up
 demo-up:

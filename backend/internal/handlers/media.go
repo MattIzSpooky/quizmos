@@ -1,0 +1,102 @@
+package handlers
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"mime/multipart"
+	"net/http"
+
+	"github.com/mattizspooky/quizmos/backend/internal/api"
+	"github.com/mattizspooky/quizmos/backend/internal/service"
+)
+
+// isForbidden reports whether err (from Keycloak.RequireAdminToken) is a
+// "wrong role" failure (403) rather than a missing/invalid token (401).
+func isForbidden(err error) bool {
+	var withStatus interface{ HTTPStatus() int }
+	return errors.As(err, &withStatus) && withStatus.HTTPStatus() == http.StatusForbidden
+}
+
+// UploadQuestionMedia and DeleteQuestionMedia check the Authorization
+// header themselves, rather than relying on the OpenAPI request
+// validator's usual security-scheme enforcement — see the Authorization
+// parameter's description in api/openapi.yaml for why: the validator
+// would otherwise consume the multipart body before the handler gets a
+// chance to stream it to storage.
+func (h *Handlers) UploadQuestionMedia(ctx context.Context, req api.UploadQuestionMediaRequestObject) (api.UploadQuestionMediaResponseObject, error) {
+	if _, err := h.keycloak.RequireAdminToken(req.Params.Authorization); err != nil {
+		if isForbidden(err) {
+			return api.UploadQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
+		}
+		return api.UploadQuestionMedia401JSONResponse{UnauthorizedJSONResponse: api.UnauthorizedJSONResponse(apiError("unauthorized", err.Error()))}, nil
+	}
+
+	part, err := nextFilePart(req.Body)
+	if err != nil {
+		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion(`expected a multipart file field named "file"`)}, nil
+	}
+	defer part.Close()
+
+	contentType := part.Header.Get("Content-Type")
+	_, limit, ok := service.MediaLimitBytes(contentType)
+	if !ok {
+		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion("unsupported media type: " + contentType)}, nil
+	}
+	// Multipart parts don't carry a size header, so the only way to
+	// enforce the cap is to read up to one byte past it: if that many
+	// bytes actually come through, the file is too big.
+	data, err := io.ReadAll(io.LimitReader(part, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion("file too large")}, nil
+	}
+
+	question, err := h.svc.UploadQuestionMedia(ctx, req.QuizId, req.QuestionId, contentType, bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return api.UploadQuestionMedia404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
+		case errors.Is(err, service.ErrValidation):
+			return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion("unsupported media type: " + contentType)}, nil
+		}
+		return nil, err
+	}
+	return api.UploadQuestionMedia200JSONResponse(questionToAPI(question)), nil
+}
+
+func (h *Handlers) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuestionMediaRequestObject) (api.DeleteQuestionMediaResponseObject, error) {
+	if _, err := h.keycloak.RequireAdminToken(req.Params.Authorization); err != nil {
+		if isForbidden(err) {
+			return api.DeleteQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
+		}
+		return api.DeleteQuestionMedia401JSONResponse{UnauthorizedJSONResponse: api.UnauthorizedJSONResponse(apiError("unauthorized", err.Error()))}, nil
+	}
+
+	question, err := h.svc.DeleteQuestionMedia(ctx, req.QuizId, req.QuestionId)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			return api.DeleteQuestionMedia404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
+		}
+		return nil, err
+	}
+	return api.DeleteQuestionMedia200JSONResponse(questionToAPI(question)), nil
+}
+
+// nextFilePart returns the first part named "file" in mr, skipping any
+// other fields a client might have sent alongside it.
+func nextFilePart(mr *multipart.Reader) (*multipart.Part, error) {
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			return nil, err
+		}
+		if part.FormName() == "file" {
+			return part, nil
+		}
+		part.Close()
+	}
+}

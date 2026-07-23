@@ -61,3 +61,23 @@ Feature: Reviewing an earlier question
     When "Alice" disconnects
     And "Alice" reconnects to the game websocket
     Then "Alice" should receive a "question.reviewed" message
+
+  Scenario: Reviewing is rejected while the game is still in the lobby
+    Given a quiz titled "Not Started Yet"
+    And a multiple choice question "Q" with options:
+      | text | correct |
+      | A    | true    |
+      | B    | false   |
+    And I create a game for the quiz
+    Then reviewing question 1 should fail with status 409
+
+  Scenario: Reviewing is rejected once the game has ended
+    Given a quiz titled "Already Over"
+    And a multiple choice question "Q" with options:
+      | text | correct |
+      | A    | true    |
+      | B    | false   |
+    And I create a game for the quiz
+    And the admin starts the game
+    And the admin ends the game
+    Then reviewing question 1 should fail with status 409

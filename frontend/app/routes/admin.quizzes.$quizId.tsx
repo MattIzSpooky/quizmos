@@ -29,6 +29,12 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
   const [questionType, setQuestionType] = useState<QuestionType>("multiple_choice");
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState(EMPTY_OPTIONS);
+  // Drag-to-reorder state: which question is being dragged, and which
+  // one it's currently hovering over (for the drop-position indicator).
+  // Neither touches `quiz` directly — the list only actually reorders
+  // once the drop lands and the server confirms the new order.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   async function load() {
     const { data } = await adminApi.GET("/admin/quizzes/{quizId}", { params: { path: { quizId } } });
@@ -77,6 +83,51 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
     load();
   }
 
+  async function moveQuestionBefore(draggedId: string, targetId: string) {
+    if (!quiz || draggedId === targetId) return;
+    const ids = quiz.questions.map((q) => q.id);
+    const from = ids.indexOf(draggedId);
+    if (from === -1) return;
+    ids.splice(from, 1);
+    const to = ids.indexOf(targetId);
+    ids.splice(to === -1 ? ids.length : to, 0, draggedId);
+
+    await adminApi.PUT("/admin/quizzes/{quizId}/questions/order", {
+      params: { path: { quizId } },
+      body: { questionIds: ids },
+    });
+    load();
+  }
+
+  async function uploadMedia(questionId: string, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    await adminApi.POST("/admin/quizzes/{quizId}/questions/{questionId}/media", {
+      params: {
+        path: { quizId, questionId },
+        // The real token is injected by adminApi's auth middleware for
+        // every request on this client — this placeholder only exists to
+        // satisfy the header param's type (see api/openapi.yaml: this
+        // operation checks auth itself rather than via the usual
+        // security scheme, since standard request validation would
+        // otherwise consume the multipart body before it reaches MinIO).
+        header: { Authorization: "" },
+      },
+      // openapi-typescript types a multipart requestBody by its schema
+      // shape ({ file: string }), not as FormData — but FormData is
+      // exactly what a browser multipart upload has to send.
+      body: formData as unknown as { file: string },
+    });
+    load();
+  }
+
+  async function removeMedia(questionId: string) {
+    await adminApi.DELETE("/admin/quizzes/{quizId}/questions/{questionId}/media", {
+      params: { path: { quizId, questionId }, header: { Authorization: "" } },
+    });
+    load();
+  }
+
   async function startGame() {
     const { data } = await adminApi.POST("/admin/games", { body: { quizId } });
     if (data) navigate(`/admin/games/${data.id}`);
@@ -116,10 +167,52 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
         )}
         <ul className="flex flex-col gap-3">
           {quiz.questions.map((q) => (
-            <li key={q.id}>
+            <li
+              key={q.id}
+              onDragOver={(e) => {
+                if (!draggingId) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDragOverId(q.id);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (draggingId) moveQuestionBefore(draggingId, q.id);
+                setDraggingId(null);
+                setDragOverId(null);
+              }}
+              className={`rounded-2xl transition ${
+                dragOverId === q.id && draggingId !== q.id ? "outline outline-2 outline-aurora" : ""
+              } ${draggingId === q.id ? "opacity-40" : ""}`}
+            >
               <Panel className="p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="font-medium text-paper">{q.prompt}</p>
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        setDraggingId(q.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingId(null);
+                        setDragOverId(null);
+                      }}
+                      title="Drag to reorder"
+                      aria-label="Drag to reorder"
+                      className="mt-0.5 shrink-0 cursor-grab text-dim transition hover:text-paper active:cursor-grabbing"
+                    >
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                        <circle cx="9" cy="6" r="1.5" />
+                        <circle cx="15" cy="6" r="1.5" />
+                        <circle cx="9" cy="12" r="1.5" />
+                        <circle cx="15" cy="12" r="1.5" />
+                        <circle cx="9" cy="18" r="1.5" />
+                        <circle cx="15" cy="18" r="1.5" />
+                      </svg>
+                    </span>
+                    <p className="min-w-0 font-medium text-paper">{q.prompt}</p>
+                  </div>
                   <button
                     onClick={() => deleteQuestion(q.id)}
                     className="shrink-0 font-mono text-xs text-flare/80 underline decoration-flare/30 underline-offset-4 hover:text-flare"
@@ -143,6 +236,41 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
                       </li>
                     ))}
                   </ul>
+                )}
+
+                {q.mediaUrl ? (
+                  <div className="mt-3 flex flex-col items-start gap-2">
+                    {q.mediaType === "image" ? (
+                      <img
+                        src={q.mediaUrl}
+                        alt=""
+                        className="max-h-40 rounded-lg border border-void-3 object-contain"
+                      />
+                    ) : (
+                      <audio controls src={q.mediaUrl} className="w-full" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeMedia(q.id)}
+                      className="font-mono text-xs text-flare/80 underline decoration-flare/30 underline-offset-4 hover:text-flare"
+                    >
+                      Remove media
+                    </button>
+                  </div>
+                ) : (
+                  <label className="mt-3 inline-flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-void-3 px-3 py-2 font-mono text-xs text-dim transition hover:border-starlight-dim hover:text-paper">
+                    + Add image or audio
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/webm"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) uploadMedia(q.id, file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
                 )}
               </Panel>
             </li>

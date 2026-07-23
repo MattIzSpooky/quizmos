@@ -58,3 +58,30 @@ Feature: Live gameplay over the websocket
   Scenario: Going back past the first question is rejected
     Given the admin starts the game
     Then going back should fail with status 400
+
+  Scenario: Answering the same question twice is rejected
+    Given the admin starts the game
+    And "Alice" answers "4"
+    And "Alice" should receive an "answer.result" message with correct true and 100 points
+    When "Alice" answers "3"
+    Then "Alice" should receive an "error" message
+
+  Scenario: Answering with a question id that isn't the live question is rejected
+    Given the admin starts the game
+    When "Alice" answers with a mismatched question id
+    Then "Alice" should receive an "error" message
+
+  Scenario: Answering with an option that doesn't exist is rejected
+    Given the admin starts the game
+    When "Alice" answers with an option that doesn't exist
+    Then "Alice" should receive an "error" message
+
+  Scenario: Submitting free text to a multiple choice question is rejected
+    Given the admin starts the game
+    When "Alice" submits free text on a multiple choice question
+    Then "Alice" should receive an "error" message
+
+  Scenario: The admin can force-end a game before the last question
+    Given the admin starts the game
+    When the admin ends the game
+    Then "Alice" should receive a "game.ended" message

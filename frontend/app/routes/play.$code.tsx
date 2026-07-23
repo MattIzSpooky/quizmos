@@ -20,6 +20,20 @@ export function meta({}: Route.MetaArgs) {
 
 const MAX_FREE_TEXT_ANSWER_LENGTH = 500;
 
+function QuestionMedia({ mediaUrl, mediaType }: { mediaUrl?: string; mediaType?: string }) {
+  if (!mediaUrl) return null;
+  if (mediaType === "image") {
+    return (
+      <img
+        src={mediaUrl}
+        alt=""
+        className="max-h-64 w-full rounded-xl border border-void-3 object-contain"
+      />
+    );
+  }
+  return <audio controls src={mediaUrl} className="w-full" />;
+}
+
 type PlayState =
   | { phase: "lobby"; playerCount: number }
   | { phase: "question"; question: QuestionStarted }
@@ -176,6 +190,8 @@ export default function Play({ params }: Route.ComponentProps) {
               </div>
             </div>
 
+            <QuestionMedia mediaUrl={state.question.mediaUrl} mediaType={state.question.mediaType} />
+
             {state.question.type === "free_text" ? (
               <div className="flex flex-col gap-2">
                 <textarea
@@ -246,6 +262,7 @@ export default function Play({ params }: Route.ComponentProps) {
             <h1 className="text-center font-display text-xl font-semibold text-paper">
               {lastQuestion.prompt}
             </h1>
+            <QuestionMedia mediaUrl={lastQuestion.mediaUrl} mediaType={lastQuestion.mediaType} />
             {lastQuestion.type === "free_text" ? (
               <div className="rounded-2xl border border-void-3 bg-void-2/60 p-5">
                 {latestAnswerResult?.questionId === lastQuestion.questionId &&
@@ -324,6 +341,7 @@ export default function Play({ params }: Route.ComponentProps) {
               <h1 className="text-center font-display text-xl font-semibold text-paper">
                 {state.review.prompt}
               </h1>
+              <QuestionMedia mediaUrl={state.review.mediaUrl} mediaType={state.review.mediaType} />
               {state.review.options.length > 0 && (
                 <ul className="mt-4 flex flex-col gap-2">
                   {state.review.options.map((opt) => {

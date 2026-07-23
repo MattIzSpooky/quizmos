@@ -41,3 +41,26 @@ Feature: Resuming live play after a review preserves the player's own answer
     When "Alice" disconnects
     And "Alice" reconnects to the game websocket
     Then "Alice" should receive a "question.started" message with your answer pending
+
+  Scenario: Resuming preserves an already-answered multiple-choice question
+    Given I am authenticated as an admin
+    And a quiz titled "Two Multiple Choice Rounds"
+    And a multiple choice question "Round 1" with options:
+      | text | correct |
+      | A    | true    |
+      | B    | false   |
+    And a multiple choice question "Round 2" with options:
+      | text | correct |
+      | A    | true    |
+      | B    | false   |
+    And I create a game for the quiz
+    And "Alice" joins the game
+    And "Alice" connects to the game websocket
+    And the admin starts the game
+    And the admin advances to the next question
+    And "Alice" answers "A"
+    And "Alice" should receive an "answer.result" message with correct true and 100 points
+    And the admin reviews question 1
+    And "Alice" should receive a "question.reviewed" message
+    When the admin reviews question 2
+    Then "Alice" should receive a "question.started" message with your answer graded correct and 100 points

@@ -30,3 +30,8 @@ Feature: Choosing a player color
     And the admin starts the game
     And "Alice" answers "A"
     Then the leaderboard should show "Alice" with color "quasar"
+
+  Scenario: Rejoining with a different color updates it
+    Given "Alice" joins the game with color "comet"
+    When "Alice" joins the game again with color "solar"
+    Then "Alice" should be shown to the admin with color "solar"

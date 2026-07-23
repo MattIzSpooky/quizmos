@@ -13,6 +13,7 @@ import (
 
 type Querier interface {
 	AddPlayerScore(ctx context.Context, arg AddPlayerScoreParams) error
+	ClearQuestionMedia(ctx context.Context, arg ClearQuestionMediaParams) (Question, error)
 	CountAnswersByOption(ctx context.Context, questionID uuid.UUID) ([]CountAnswersByOptionRow, error)
 	CountPlayers(ctx context.Context, gameID uuid.UUID) (int64, error)
 	CountQuizQuestions(ctx context.Context, quizID uuid.UUID) (int64, error)
@@ -50,6 +51,7 @@ type Querier interface {
 	ListQuizzes(ctx context.Context) ([]Quiz, error)
 	NextQuestionPosition(ctx context.Context, quizID uuid.UUID) (int32, error)
 	SetCurrentQuestionIndex(ctx context.Context, arg SetCurrentQuestionIndexParams) (Game, error)
+	SetQuestionMedia(ctx context.Context, arg SetQuestionMediaParams) (Question, error)
 	SetQuestionPosition(ctx context.Context, arg SetQuestionPositionParams) error
 	StartGame(ctx context.Context, id uuid.UUID) (Game, error)
 	UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) (Question, error)

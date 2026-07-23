@@ -12,12 +12,13 @@ import (
 // service (persistence + business rules) and the websocket hub (to
 // broadcast the effects of admin mutations to connected players).
 type Handlers struct {
-	svc *service.Service
-	hub *ws.Hub
+	svc      *service.Service
+	hub      *ws.Hub
+	keycloak *auth.Keycloak
 }
 
-func New(svc *service.Service, hub *ws.Hub) *Handlers {
-	return &Handlers{svc: svc, hub: hub}
+func New(svc *service.Service, hub *ws.Hub, keycloak *auth.Keycloak) *Handlers {
+	return &Handlers{svc: svc, hub: hub, keycloak: keycloak}
 }
 
 // adminSubject returns the Keycloak subject of the authenticated caller,

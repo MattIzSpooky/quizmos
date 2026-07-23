@@ -45,6 +45,23 @@ services:
       retries: 30
       start_period: 30s
 
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000" # S3 API — question media (images/audio) is fetched from here directly by browsers
+      - "9001:9001" # web console, handy for poking at the bucket during a demo
+    volumes:
+      - quizmos-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # One-shot: applies backend/internal/db/migrations to postgres, then
   # exits. The backend depends on this finishing successfully rather than
   # migrating itself, so the schema is always in place before it starts
@@ -70,6 +87,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      minio:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     environment:
@@ -81,6 +100,17 @@ services:
       KEYCLOAK_ISSUER: http://localhost:8081/realms/quizmos
       ADMIN_ROLE: quiz-admin
       FRONTEND_ORIGIN: http://localhost:5173
+      # S3_ENDPOINT is where the backend itself uploads question media —
+      # the internal docker network address. S3_PUBLIC_URL is what gets
+      # baked into the URLs returned to clients, since a browser fetches
+      # media directly from MinIO, not through the backend; unlike
+      # Keycloak's issuer, no identity check ties these together, so they
+      # can safely point at different addresses.
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: quizmos-media
+      S3_PUBLIC_URL: http://localhost:9000
     # "localhost" inside this container normally means itself, not the
     # host — but KEYCLOAK_ISSUER above has to say "localhost:8081" to
     # match what the browser sees. Redirecting it to the host gateway lets
@@ -103,3 +133,4 @@ services:
 
 volumes:
   quizmos-postgres-data:
+  quizmos-minio-data:

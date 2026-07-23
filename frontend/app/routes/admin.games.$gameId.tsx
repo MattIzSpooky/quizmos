@@ -222,6 +222,27 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
                       </li>
                     ))}
                   </ul>
+                  {displayedQuestion.mediaUrl &&
+                    (displayedQuestion.mediaType === "image" ? (
+                      <img
+                        src={displayedQuestion.mediaUrl}
+                        alt=""
+                        className="mt-3 max-h-48 rounded-lg border border-void-3 object-contain"
+                      />
+                    ) : (
+                      // Keyed by question id so a new question's audio
+                      // actually autoplays rather than being treated as
+                      // the same <audio> element with an updated src —
+                      // this is how the admin plays a clip centrally
+                      // (e.g. through room speakers) without extra clicks.
+                      <audio
+                        key={displayedQuestion.id}
+                        controls
+                        autoPlay
+                        src={displayedQuestion.mediaUrl}
+                        className="mt-3 w-full"
+                      />
+                    ))}
                 </>
               ) : (
                 <p className="mt-1 text-sm text-dim">Loading question…</p>

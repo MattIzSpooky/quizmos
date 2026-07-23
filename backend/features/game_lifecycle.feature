@@ -85,3 +85,14 @@ Feature: Game lifecycle
     And the admin starts the game
     When "Alice" connects to the game websocket
     Then "Alice" should receive a "question.started" message
+
+  Scenario: Rejoining while still in the lobby just updates the player, not a duplicate
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    When "Alice" rejoins the game
+    Then the request should succeed
+    And the game should have 1 players
+
+  Scenario: Kicking a player who never joined fails
+    Given I create a game for the quiz
+    Then kicking a player who never joined should fail with status 404

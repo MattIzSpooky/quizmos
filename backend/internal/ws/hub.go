@@ -162,6 +162,7 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 		for i, o := range question.Options {
 			options[i] = QuestionOption{ID: o.ID.String(), Text: o.Text}
 		}
+		mediaURL, mediaType := mediaFields(question)
 		payload := QuestionStarted{
 			QuestionIndex:    int64(question.Position),
 			QuestionID:       question.ID.String(),
@@ -171,6 +172,8 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 			Timed:            quiz.Timed,
 			TimeLimitSeconds: int64(question.TimeLimitSeconds),
 			TotalQuestions:   int64(total),
+			MediaURL:         mediaURL,
+			MediaType:        mediaType,
 		}
 		// A reconnecting client (dropped connection, page refresh) might
 		// already have answered this exact question — without folding
@@ -199,6 +202,18 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 	}
 }
 
+// mediaFields mirrors handlers.mediaFields — kept as its own small copy
+// here (rather than exported and shared) since handlers already imports
+// ws, and having ws import handlers back would be a cycle.
+func mediaFields(q service.QuestionWithOptions) (*string, *MediaType) {
+	if q.MediaURL == "" {
+		return nil, nil
+	}
+	url := q.MediaURL
+	mediaType := MediaType(q.MediaType.String)
+	return &url, &mediaType
+}
+
 // questionReviewedPayload mirrors handlers.questionReviewedPayload — kept
 // as its own small copy here (rather than exported and shared) since
 // handlers already imports ws, and having ws import handlers back would
@@ -215,6 +230,7 @@ func questionReviewedPayload(q service.QuestionWithOptions, total int, counts ma
 		}
 		answerCounts = append(answerCounts, AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
 	}
+	mediaURL, mediaType := mediaFields(q)
 	return QuestionReviewed{
 		QuestionIndex:   int64(q.Position),
 		QuestionID:      q.ID.String(),
@@ -223,6 +239,8 @@ func questionReviewedPayload(q service.QuestionWithOptions, total int, counts ma
 		CorrectOptionID: correctID,
 		AnswerCounts:    answerCounts,
 		TotalQuestions:  int64(total),
+		MediaURL:        mediaURL,
+		MediaType:       mediaType,
 	}
 }
 

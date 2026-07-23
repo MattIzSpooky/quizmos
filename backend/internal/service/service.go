@@ -13,12 +13,13 @@ import (
 )
 
 type Service struct {
-	pool *pgxpool.Pool
-	q    *db.Queries
+	pool  *pgxpool.Pool
+	q     *db.Queries
+	store MediaStorage
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, q: db.New(pool)}
+func New(pool *pgxpool.Pool, store MediaStorage) *Service {
+	return &Service{pool: pool, q: db.New(pool), store: store}
 }
 
 // withTx runs fn inside a transaction, giving it a *Service bound to the tx.
@@ -29,7 +30,7 @@ func (s *Service) withTx(ctx context.Context, fn func(*Service) error) error {
 	}
 	defer tx.Rollback(ctx)
 
-	txService := &Service{pool: s.pool, q: s.q.WithTx(tx)}
+	txService := &Service{pool: s.pool, q: s.q.WithTx(tx), store: s.store}
 	if err := fn(txService); err != nil {
 		return err
 	}

@@ -339,13 +339,16 @@ type AnswerCount struct {
 // clients must not offer a way to answer it. correctOptionId and answerCounts are only
 // meaningful for multiple_choice — free_text has no per-option breakdown.
 type QuestionReviewed struct {
-	AnswerCounts    []AnswerCount    `json:"answerCounts"`
-	CorrectOptionID *string          `json:"correctOptionId,omitempty"`
-	Options         []QuestionOption `json:"options"`
-	Prompt          string           `json:"prompt"`
-	QuestionID      string           `json:"questionId"`
-	QuestionIndex   int64            `json:"questionIndex"`
-	TotalQuestions  int64            `json:"totalQuestions"`
+	AnswerCounts                                      []AnswerCount    `json:"answerCounts"`
+	CorrectOptionID                                   *string          `json:"correctOptionId,omitempty"`
+	MediaType                                         *MediaType       `json:"mediaType,omitempty"`
+	// Absent when the question has no attached media.                 
+	MediaURL                                          *string          `json:"mediaUrl,omitempty"`
+	Options                                           []QuestionOption `json:"options"`
+	Prompt                                            string           `json:"prompt"`
+	QuestionID                                        string           `json:"questionId"`
+	QuestionIndex                                     int64            `json:"questionIndex"`
+	TotalQuestions                                    int64            `json:"totalQuestions"`
 }
 
 type QuestionOption struct {
@@ -354,6 +357,9 @@ type QuestionOption struct {
 }
 
 type QuestionStarted struct {
+	MediaType                                                                                   *MediaType       `json:"mediaType,omitempty"`
+	// Absent when the question has no attached media.                                                           
+	MediaURL                                                                                    *string          `json:"mediaUrl,omitempty"`
 	Options                                                                                     []QuestionOption `json:"options"`
 	Prompt                                                                                      string           `json:"prompt"`
 	QuestionID                                                                                  string           `json:"questionId"`
@@ -398,6 +404,13 @@ const (
 	Nova    Color = "nova"
 	Quasar  Color = "quasar"
 	Solar   Color = "solar"
+)
+
+type MediaType string
+
+const (
+	Audio MediaType = "audio"
+	Image MediaType = "image"
 )
 
 // Determines how the client should collect an answer: option buttons for multiple_choice, a

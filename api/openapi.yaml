@@ -106,7 +106,11 @@ paths:
     delete:
       operationId: deleteQuiz
       tags: [quizzes]
-      summary: Delete a quiz
+      summary: >
+        Delete a quiz and its questions. Rejected with 409 if any game has
+        ever been created from it (lobby, in-progress, or ended) — a game
+        is a historical record of a play session and shouldn't silently
+        lose the quiz it was played from.
       security: [{ bearerAuth: [] }]
       responses:
         "204":
@@ -117,6 +121,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /admin/quizzes/{quizId}/questions:
     parameters:
@@ -256,6 +262,70 @@ paths:
       responses:
         "204":
           description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/quizzes/{quizId}/questions/{questionId}/media:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+      - $ref: "#/components/parameters/QuestionId"
+      - $ref: "#/components/parameters/Authorization"
+    post:
+      operationId: uploadQuestionMedia
+      tags: [questions]
+      summary: >
+        Attach an optional image or audio fragment to a question,
+        replacing any existing media. Shown to players when the question
+        starts, and to the admin during the live game (to play audio
+        centrally or reference the image while giving a hint). Requires
+        an admin bearer token (see the Authorization parameter) — not
+        secured via the usual bearerAuth scheme, since standard request
+        validation would consume the multipart body before the handler
+        can stream it to storage.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Media attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteQuestionMedia
+      tags: [questions]
+      summary: >
+        Remove a question's attached media, if any. Uses the same manual
+        Authorization check as the upload operation, for consistency
+        between the two.
+      responses:
+        "200":
+          description: Media removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -725,6 +795,21 @@ components:
       schema:
         type: string
         format: uuid
+    Authorization:
+      name: Authorization
+      in: header
+      required: true
+      description: >
+        "Bearer <token>". Declared as a plain header parameter (checked
+        manually in the handler) rather than a bearerAuth security
+        scheme, and excluded from the usual OpenAPI request validation —
+        both specifically for the media upload/delete operations, whose
+        multipart request body must reach the handler unconsumed. The
+        standard validator reads the whole multipart body to validate
+        it, which would leave nothing for the handler to stream to
+        storage.
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -856,6 +941,10 @@ components:
             isCorrect:
               type: boolean
 
+    MediaType:
+      type: string
+      enum: [image, audio]
+
     Question:
       type: object
       required: [id, quizId, type, prompt, position, timeLimitSeconds, points, options]
@@ -880,6 +969,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuestionOptionWithAnswer"
+        mediaUrl:
+          type: string
+          description: Absent when the question has no attached media.
+        mediaType:
+          $ref: "#/components/schemas/MediaType"
 
     CreateQuestionOption:
       type: object

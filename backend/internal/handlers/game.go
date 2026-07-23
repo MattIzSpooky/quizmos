@@ -201,11 +201,23 @@ func (h *Handlers) GetAdminLeaderboard(ctx context.Context, req api.GetAdminLead
 	return api.GetAdminLeaderboard200JSONResponse(leaderboardToAPI(leaderboard)), nil
 }
 
+// mediaFields returns q's attached media as pointers suitable for an
+// optional websocket payload field — both nil when there's none.
+func mediaFields(q service.QuestionWithOptions) (*string, *ws.MediaType) {
+	if q.MediaURL == "" {
+		return nil, nil
+	}
+	url := q.MediaURL
+	mediaType := ws.MediaType(q.MediaType.String)
+	return &url, &mediaType
+}
+
 func questionStartedPayload(q service.QuestionWithOptions, index, total int, timed bool) ws.QuestionStarted {
 	options := make([]ws.QuestionOption, len(q.Options))
 	for i, o := range q.Options {
 		options[i] = ws.QuestionOption{ID: o.ID.String(), Text: o.Text}
 	}
+	mediaURL, mediaType := mediaFields(q)
 	return ws.QuestionStarted{
 		QuestionIndex:    int64(index),
 		QuestionID:       q.ID.String(),
@@ -215,6 +227,8 @@ func questionStartedPayload(q service.QuestionWithOptions, index, total int, tim
 		Timed:            timed,
 		TimeLimitSeconds: int64(q.TimeLimitSeconds),
 		TotalQuestions:   int64(total),
+		MediaURL:         mediaURL,
+		MediaType:        mediaType,
 	}
 }
 
@@ -234,6 +248,7 @@ func questionReviewedPayload(q service.QuestionWithOptions, total int, counts ma
 		}
 		answerCounts = append(answerCounts, ws.AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
 	}
+	mediaURL, mediaType := mediaFields(q)
 	return ws.QuestionReviewed{
 		QuestionIndex:   int64(q.Position),
 		QuestionID:      q.ID.String(),
@@ -242,6 +257,8 @@ func questionReviewedPayload(q service.QuestionWithOptions, total int, counts ma
 		CorrectOptionID: correctID,
 		AnswerCounts:    answerCounts,
 		TotalQuestions:  int64(total),
+		MediaURL:        mediaURL,
+		MediaType:       mediaType,
 	}
 }
 

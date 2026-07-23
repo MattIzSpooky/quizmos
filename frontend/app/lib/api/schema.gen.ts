@@ -35,7 +35,7 @@ export interface paths {
         get: operations["getQuiz"];
         put?: never;
         post?: never;
-        /** Delete a quiz */
+        /** Delete a quiz and its questions. Rejected with 409 if any game has ever been created from it (lobby, in-progress, or ended) — a game is a historical record of a play session and shouldn't silently lose the quiz it was played from. */
         delete: operations["deleteQuiz"];
         options?: never;
         head?: never;
@@ -102,6 +102,30 @@ export interface paths {
         head?: never;
         /** Update a question */
         patch: operations["updateQuestion"];
+        trace?: never;
+    };
+    "/admin/quizzes/{quizId}/questions/{questionId}/media": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
+                Authorization: components["parameters"]["Authorization"];
+            };
+            path: {
+                quizId: components["parameters"]["QuizId"];
+                questionId: components["parameters"]["QuestionId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Attach an optional image or audio fragment to a question, replacing any existing media. Shown to players when the question starts, and to the admin during the live game (to play audio centrally or reference the image while giving a hint). Requires an admin bearer token (see the Authorization parameter) — not secured via the usual bearerAuth scheme, since standard request validation would consume the multipart body before the handler can stream it to storage. */
+        post: operations["uploadQuestionMedia"];
+        /** Remove a question's attached media, if any. Uses the same manual Authorization check as the upload operation, for consistency between the two. */
+        delete: operations["deleteQuestionMedia"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/admin/games": {
@@ -413,6 +437,8 @@ export interface components {
         QuestionOptionWithAnswer: components["schemas"]["QuestionOption"] & {
             isCorrect: boolean;
         };
+        /** @enum {string} */
+        MediaType: "image" | "audio";
         Question: {
             /** Format: uuid */
             id: string;
@@ -424,6 +450,9 @@ export interface components {
             timeLimitSeconds: number;
             points: number;
             options: components["schemas"]["QuestionOptionWithAnswer"][];
+            /** @description Absent when the question has no attached media. */
+            mediaUrl?: string;
+            mediaType?: components["schemas"]["MediaType"];
         };
         CreateQuestionOption: {
             text: string;
@@ -590,6 +619,8 @@ export interface components {
         GameId: string;
         ClientId: string;
         OptionalClientId: string;
+        /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
+        Authorization: string;
     };
     requestBodies: never;
     headers: never;
@@ -691,6 +722,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     updateQuiz: {
@@ -883,6 +915,72 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadQuestionMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
+                Authorization: components["parameters"]["Authorization"];
+            };
+            path: {
+                quizId: components["parameters"]["QuizId"];
+                questionId: components["parameters"]["QuestionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Media attached */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Question"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteQuestionMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
+                Authorization: components["parameters"]["Authorization"];
+            };
+            path: {
+                quizId: components["parameters"]["QuizId"];
+                questionId: components["parameters"]["QuestionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Media removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Question"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

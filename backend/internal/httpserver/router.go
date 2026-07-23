@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/go-chi/chi/v5"
@@ -55,6 +56,15 @@ func New(opts Options) (http.Handler, error) {
 			},
 			ErrorHandlerWithOpts: jsonErrorHandler,
 			Prefix:               "/api",
+			// The question-media upload/delete routes check auth
+			// themselves (see internal/handlers/media.go) and skip
+			// validation entirely: the standard validator fully reads a
+			// multipart/form-data body to validate it, which would
+			// consume the file before the handler could stream it to
+			// storage.
+			Skipper: func(r *http.Request) bool {
+				return strings.HasSuffix(r.URL.Path, "/media")
+			},
 		}))
 		strict := api.NewStrictHandler(opts.StrictHandler, nil)
 		api.HandlerFromMux(strict, apiRouter)

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 )
 
 func decodeJSON(r io.Reader, dst any) error {
@@ -82,6 +84,47 @@ func (w *World) request(ctx context.Context, method, path string, token, clientI
 
 func (w *World) adminRequest(ctx context.Context, method, path string, body any) (apiResponse, error) {
 	return w.request(ctx, method, path, w.adminToken, "", body)
+}
+
+// uploadMedia POSTs a single-file multipart/form-data body (field name
+// "file") to path with the admin's bearer token — exercising the same
+// request shape a real browser's FormData upload produces, for the
+// question-media upload endpoint.
+func (w *World) uploadMedia(ctx context.Context, path, filename, contentType string, data []byte) (apiResponse, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	partHeader := textproto.MIMEHeader{}
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+	partHeader.Set("Content-Type", contentType)
+	part, err := mw.CreatePart(partHeader)
+	if err != nil {
+		return apiResponse{}, err
+	}
+	if _, err := part.Write(data); err != nil {
+		return apiResponse{}, err
+	}
+	if err := mw.Close(); err != nil {
+		return apiResponse{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.env.baseURL+path, &buf)
+	if err != nil {
+		return apiResponse{}, err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+w.adminToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return apiResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	result := apiResponse{Status: resp.StatusCode}
+	if err := decodeJSON(resp.Body, &result.Body); err != nil {
+		return apiResponse{}, fmt.Errorf("decode upload response: %w", err)
+	}
+	return result, nil
 }
 
 func (w *World) publicRequest(ctx context.Context, method, path, clientID string, body any) (apiResponse, error) {

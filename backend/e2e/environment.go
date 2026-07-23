@@ -1,9 +1,9 @@
 // Package e2e runs Gherkin/godog feature scenarios against a real
 // quizmos backend: an httptest server wired to the actual chi router,
-// service layer and websocket hub, backed by a real Postgres and a real
-// Keycloak, both started as testcontainers. Nothing here is mocked —
-// this is the same code path that runs in production, just pointed at
-// disposable infrastructure.
+// service layer and websocket hub, backed by a real Postgres, a real
+// Keycloak, and a real MinIO, all started as testcontainers. Nothing
+// here is mocked — this is the same code path that runs in production,
+// just pointed at disposable infrastructure.
 package e2e
 
 import (
@@ -20,6 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
+	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/mattizspooky/quizmos/backend/internal/handlers"
 	"github.com/mattizspooky/quizmos/backend/internal/httpserver"
 	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/storage"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
@@ -35,6 +37,7 @@ const (
 	e2eAdminPassword = "quizmos-dev"
 	e2eClientID      = "quizmos-e2e"
 	e2eAdminRole     = "quiz-admin"
+	e2eMediaBucket   = "quizmos-media-test"
 )
 
 // environment owns every long-lived resource for one test run: both
@@ -43,15 +46,17 @@ const (
 // slate via truncateAll in a Before hook instead of paying container
 // startup cost per scenario.
 type environment struct {
-	pgContainer *tcpostgres.PostgresContainer
-	kcContainer testcontainers.Container
+	pgContainer    *tcpostgres.PostgresContainer
+	kcContainer    testcontainers.Container
+	minioContainer *tcminio.MinioContainer
 
 	pool   *pgxpool.Pool
 	server *httptest.Server
 
-	baseURL     string // http://.../api
-	wsBaseURL   string // ws://.../ws
-	keycloakURL string // http://.../realms/quizmos
+	baseURL      string // http://.../api
+	wsBaseURL    string // ws://.../ws
+	keycloakURL  string // http://.../realms/quizmos
+	mediaBaseURL string // http://.../quizmos-media-test — where uploaded media is publicly fetchable
 }
 
 func repoRoot() string {
@@ -108,6 +113,13 @@ func startEnvironment(ctx context.Context) (*environment, error) {
 		return nil, fmt.Errorf("start keycloak container: %w", err)
 	}
 
+	minioC, err := tcminio.Run(ctx, "minio/minio:RELEASE.2025-09-07T16-13-09Z")
+	if err != nil {
+		_ = pgC.Terminate(ctx)
+		_ = kcContainer.Terminate(ctx)
+		return nil, fmt.Errorf("start minio container: %w", err)
+	}
+
 	connStr, err := pgC.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		return nil, fmt.Errorf("postgres connection string: %w", err)
@@ -133,9 +145,28 @@ func startEnvironment(ctx context.Context) (*environment, error) {
 		return nil, fmt.Errorf("fetch JWKS from test keycloak: %w", err)
 	}
 
-	svc := service.New(pool)
+	minioEndpoint, err := minioC.ConnectionString(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("minio connection string: %w", err)
+	}
+	mediaBaseURL := "http://" + minioEndpoint
+	store, err := storage.New(storage.Config{
+		Endpoint:  minioEndpoint,
+		AccessKey: minioC.Username,
+		SecretKey: minioC.Password,
+		Bucket:    e2eMediaBucket,
+		PublicURL: mediaBaseURL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build storage client: %w", err)
+	}
+	if err := store.EnsureBucket(ctx); err != nil {
+		return nil, fmt.Errorf("ensure media bucket: %w", err)
+	}
+
+	svc := service.New(pool, store)
 	hub := ws.NewHub(svc, []string{"*"})
-	h := handlers.New(svc, hub)
+	h := handlers.New(svc, hub, kcAuth)
 	router, err := httpserver.New(httpserver.Options{
 		StrictHandler:  h,
 		Keycloak:       kcAuth,
@@ -149,13 +180,15 @@ func startEnvironment(ctx context.Context) (*environment, error) {
 	server := httptest.NewServer(router)
 
 	return &environment{
-		pgContainer: pgC,
-		kcContainer: kcContainer,
-		pool:        pool,
-		server:      server,
-		baseURL:     server.URL + "/api",
-		wsBaseURL:   "ws" + strings.TrimPrefix(server.URL, "http") + "/ws",
-		keycloakURL: keycloakBase,
+		pgContainer:    pgC,
+		kcContainer:    kcContainer,
+		minioContainer: minioC,
+		pool:           pool,
+		server:         server,
+		baseURL:        server.URL + "/api",
+		wsBaseURL:      "ws" + strings.TrimPrefix(server.URL, "http") + "/ws",
+		mediaBaseURL:   mediaBaseURL,
+		keycloakURL:    keycloakBase,
 	}, nil
 }
 
@@ -164,6 +197,7 @@ func (e *environment) shutdown(ctx context.Context) {
 	e.pool.Close()
 	_ = e.kcContainer.Terminate(ctx)
 	_ = e.pgContainer.Terminate(ctx)
+	_ = e.minioContainer.Terminate(ctx)
 }
 
 // truncateAll resets all tables between scenarios so each one starts

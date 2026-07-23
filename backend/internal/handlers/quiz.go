@@ -60,8 +60,11 @@ func (h *Handlers) UpdateQuiz(ctx context.Context, req api.UpdateQuizRequestObje
 
 func (h *Handlers) DeleteQuiz(ctx context.Context, req api.DeleteQuizRequestObject) (api.DeleteQuizResponseObject, error) {
 	if err := h.svc.DeleteQuiz(ctx, req.QuizId); err != nil {
-		if errors.Is(err, service.ErrNotFound) {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
 			return api.DeleteQuiz404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "quiz not found"))}, nil
+		case errors.Is(err, service.ErrConflict):
+			return api.DeleteQuiz409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(apiError("conflict", "a game has already been created from this quiz"))}, nil
 		}
 		return nil, err
 	}

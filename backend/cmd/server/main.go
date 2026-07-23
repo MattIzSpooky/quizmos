@@ -15,6 +15,7 @@ import (
 	"github.com/mattizspooky/quizmos/backend/internal/handlers"
 	"github.com/mattizspooky/quizmos/backend/internal/httpserver"
 	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/storage"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
@@ -38,9 +39,24 @@ func main() {
 		log.Fatalf("keycloak JWKS: %v", err)
 	}
 
-	svc := service.New(pool)
+	store, err := storage.New(storage.Config{
+		Endpoint:  cfg.S3Endpoint,
+		AccessKey: cfg.S3AccessKey,
+		SecretKey: cfg.S3SecretKey,
+		Bucket:    cfg.S3Bucket,
+		UseSSL:    cfg.S3UseSSL,
+		PublicURL: cfg.S3PublicURL,
+	})
+	if err != nil {
+		log.Fatalf("storage client: %v", err)
+	}
+	if err := store.EnsureBucket(ctx); err != nil {
+		log.Fatalf("ensure media bucket: %v", err)
+	}
+
+	svc := service.New(pool, store)
 	hub := ws.NewHub(svc, cfg.AllowedOrigins)
-	handler := handlers.New(svc, hub)
+	handler := handlers.New(svc, hub, keycloak)
 
 	router, err := httpserver.New(httpserver.Options{
 		StrictHandler:  handler,
