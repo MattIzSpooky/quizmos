@@ -56,7 +56,7 @@ func TestEnvelope_WireFormatMatchesAsyncAPIContract(t *testing.T) {
 	if err := json.Unmarshal(env.Payload, &submit); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if submit.QuestionID != "q1" || submit.OptionID != "o1" {
+	if submit.QuestionID != "q1" || submit.OptionID == nil || *submit.OptionID != "o1" {
 		t.Errorf("submit = %+v, want {QuestionID: q1, OptionID: o1}", submit)
 	}
 }

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import type { Route } from "./+types/home";
 import { publicApi } from "../lib/api/client";
 import { getClientId } from "../lib/client-id";
+import { DEFAULT_PLAYER_COLOR, PLAYER_COLORS } from "../lib/playerColors";
 import { Button, Panel } from "../components/ui";
 
 export function meta({}: Route.MetaArgs) {
@@ -20,6 +21,7 @@ export default function Home() {
   const prefilledCode = (searchParams.get("code") ?? "").toUpperCase();
   const [code, setCode] = useState(prefilledCode);
   const [nickname, setNickname] = useState("");
+  const [color, setColor] = useState(DEFAULT_PLAYER_COLOR);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,7 +31,7 @@ export default function Home() {
     setSubmitting(true);
     const { data, error: apiError } = await publicApi.POST("/games/join", {
       params: { header: { "X-Client-Id": getClientId() } },
-      body: { code: code.trim().toUpperCase(), nickname: nickname.trim() },
+      body: { code: code.trim().toUpperCase(), nickname: nickname.trim(), color },
     });
     setSubmitting(false);
     if (apiError || !data) {
@@ -82,6 +84,30 @@ export default function Home() {
                 required
               />
             </label>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+                Your color
+              </span>
+              <div className="flex flex-wrap gap-3">
+                {PLAYER_COLORS.map((option) => {
+                  const selected = option.id === color;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setColor(option.id)}
+                      aria-label={option.label}
+                      aria-pressed={selected}
+                      title={option.label}
+                      className={`h-9 w-9 shrink-0 rounded-full transition ${
+                        selected ? "ring-2 ring-paper ring-offset-2 ring-offset-void" : "hover:scale-110"
+                      }`}
+                      style={{ backgroundColor: option.hex }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
 
             {error && (
               <p role="alert" className="text-sm text-flare">

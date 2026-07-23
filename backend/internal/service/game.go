@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ type LeaderboardEntry struct {
 	Nickname string
 	Score    int
 	Rank     int
+	Color    string
 }
 
 // TimeOrZero converts a possibly-null Postgres timestamp to a time.Time,
@@ -383,7 +385,12 @@ func (s *Service) answerCounts(ctx context.Context, questionID uuid.UUID) (map[u
 	}
 	out := make(map[uuid.UUID]int, len(rows))
 	for _, r := range rows {
-		out[r.SelectedOptionID] = int(r.AnswerCount)
+		// free_text answers group into one NULL row — irrelevant here,
+		// this histogram is a multiple_choice-only concept.
+		if !r.SelectedOptionID.Valid {
+			continue
+		}
+		out[uuid.UUID(r.SelectedOptionID.Bytes)] = int(r.AnswerCount)
 	}
 	return out, nil
 }
@@ -395,7 +402,7 @@ func (s *Service) Leaderboard(ctx context.Context, gameID uuid.UUID) ([]Leaderbo
 	}
 	out := make([]LeaderboardEntry, len(rows))
 	for i, r := range rows {
-		out[i] = LeaderboardEntry{ClientID: r.ClientID, Nickname: r.Nickname, Score: int(r.Score), Rank: int(r.Rank)}
+		out[i] = LeaderboardEntry{ClientID: r.ClientID, Nickname: r.Nickname, Score: int(r.Score), Rank: int(r.Rank), Color: r.Color}
 	}
 	return out, nil
 }
@@ -451,7 +458,7 @@ type JoinResult struct {
 // join at all. Reconnecting mid-game (e.g. a dropped connection) doesn't
 // go through this path: it's a websocket concern against a player row
 // that already exists, not a fresh join.
-func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID, nickname string) (JoinResult, error) {
+func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID, nickname, color string) (JoinResult, error) {
 	game, err := s.q.GetGameByCode(ctx, code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -462,7 +469,9 @@ func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID,
 	if game.Status != "lobby" {
 		return JoinResult{}, ErrConflict
 	}
-	player, err := s.q.UpsertPlayer(ctx, db.UpsertPlayerParams{GameID: game.ID, ClientID: clientID, Nickname: nickname})
+	player, err := s.q.UpsertPlayer(ctx, db.UpsertPlayerParams{
+		GameID: game.ID, ClientID: clientID, Nickname: nickname, Color: NormalizePlayerColor(color),
+	})
 	if err != nil {
 		return JoinResult{}, err
 	}
@@ -519,11 +528,23 @@ type AnswerResult struct {
 	Correct       bool
 	PointsAwarded int
 	TotalScore    int
+	// Pending is true for a free-text answer awaiting the admin's manual
+	// grade — Correct/PointsAwarded are meaningless (zero) until then.
+	Pending bool
 }
 
+// MaxFreeTextAnswerLength is the longest answer text SubmitAnswer accepts
+// for a free_text question, enforced here rather than at the schema level
+// so a too-long submission gets the same ErrValidation handling (and
+// resulting websocket error message) as any other invalid answer.
+const MaxFreeTextAnswerLength = 500
+
 // SubmitAnswer validates and records a player's answer to the game's
-// current question. It is called from the websocket handler.
-func (s *Service) SubmitAnswer(ctx context.Context, gameID uuid.UUID, clientID, questionID, optionID uuid.UUID) (AnswerResult, error) {
+// current question. It is called from the websocket handler. Exactly one
+// of optionID or text must be non-nil, matching the current question's
+// type (multiple_choice or free_text respectively) — anything else is
+// ErrValidation.
+func (s *Service) SubmitAnswer(ctx context.Context, gameID uuid.UUID, clientID, questionID uuid.UUID, optionID *uuid.UUID, text *string) (AnswerResult, error) {
 	game, err := s.q.GetGame(ctx, gameID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -557,41 +578,227 @@ func (s *Service) SubmitAnswer(ctx context.Context, gameID uuid.UUID, clientID, 
 		return AnswerResult{}, err
 	}
 
-	option, err := s.q.GetOption(ctx, optionID)
-	if err != nil {
-		if err == pgx.ErrNoRows {
+	params := db.CreateAnswerParams{GameID: gameID, QuestionID: questionID, PlayerID: player.ID}
+	var result AnswerResult
+
+	switch currentQuestion.Type {
+	case QuestionTypeMultipleChoice:
+		if optionID == nil {
 			return AnswerResult{}, ErrValidation
 		}
-		return AnswerResult{}, err
-	}
-	if option.QuestionID != questionID {
+		option, err := s.q.GetOption(ctx, *optionID)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return AnswerResult{}, ErrValidation
+			}
+			return AnswerResult{}, err
+		}
+		if option.QuestionID != questionID {
+			return AnswerResult{}, ErrValidation
+		}
+
+		points := 0
+		if option.IsCorrect {
+			points = int(currentQuestion.Points)
+		}
+		params.SelectedOptionID = pgtype.UUID{Bytes: *optionID, Valid: true}
+		params.IsCorrect = pgtype.Bool{Bool: option.IsCorrect, Valid: true}
+		params.PointsAwarded = int32(points)
+		result = AnswerResult{Correct: option.IsCorrect, PointsAwarded: points, TotalScore: int(player.Score) + points}
+
+	case QuestionTypeFreeText:
+		if text == nil {
+			return AnswerResult{}, ErrValidation
+		}
+		trimmed := strings.TrimSpace(*text)
+		if trimmed == "" || len([]rune(trimmed)) > MaxFreeTextAnswerLength {
+			return AnswerResult{}, ErrValidation
+		}
+		// SelectedOptionID/IsCorrect are left at their zero value (SQL
+		// NULL) — grading happens later, by hand, via GradeAnswer.
+		params.AnswerText = pgtype.Text{String: trimmed, Valid: true}
+		result = AnswerResult{Pending: true, TotalScore: int(player.Score)}
+
+	default:
 		return AnswerResult{}, ErrValidation
 	}
 
-	points := 0
-	if option.IsCorrect {
-		points = int(currentQuestion.Points)
-	}
-
-	var result AnswerResult
 	err = s.withTx(ctx, func(tx *Service) error {
-		if _, err := tx.q.CreateAnswer(ctx, db.CreateAnswerParams{
-			GameID:           gameID,
-			QuestionID:       questionID,
-			PlayerID:         player.ID,
-			SelectedOptionID: optionID,
-			IsCorrect:        option.IsCorrect,
-			PointsAwarded:    int32(points),
-		}); err != nil {
+		if _, err := tx.q.CreateAnswer(ctx, params); err != nil {
 			return err
 		}
-		if points != 0 {
-			if err := tx.q.AddPlayerScore(ctx, db.AddPlayerScoreParams{ID: player.ID, Score: int32(points)}); err != nil {
+		if params.PointsAwarded != 0 {
+			if err := tx.q.AddPlayerScore(ctx, db.AddPlayerScoreParams{ID: player.ID, Score: params.PointsAwarded}); err != nil {
 				return err
 			}
 		}
-		result = AnswerResult{Correct: option.IsCorrect, PointsAwarded: points, TotalScore: int(player.Score) + points}
 		return nil
 	})
 	return result, err
+}
+
+// GradedAnswer describes the outcome of manually grading a free-text
+// answer, for the caller (the REST handler) to notify the affected player
+// and broadcast the updated leaderboard over the websocket.
+type GradedAnswer struct {
+	ClientID      uuid.UUID
+	QuestionID    uuid.UUID
+	QuestionIndex int
+	Correct       bool
+	PointsAwarded int
+	TotalScore    int
+}
+
+// GradeAnswer manually grades a free-text answer: full points for the
+// question if correct, none otherwise. It can be called again for the
+// same answer to correct a grading mistake — the player's score is
+// adjusted by the difference from whatever was previously awarded, not
+// simply added to again.
+func (s *Service) GradeAnswer(ctx context.Context, gameID, answerID uuid.UUID, correct bool) (GradedAnswer, error) {
+	answer, err := s.q.GetAnswerByID(ctx, answerID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return GradedAnswer{}, ErrNotFound
+		}
+		return GradedAnswer{}, err
+	}
+	if answer.GameID != gameID || !answer.AnswerText.Valid {
+		return GradedAnswer{}, ErrNotFound
+	}
+
+	question, err := s.q.GetQuestionByID(ctx, answer.QuestionID)
+	if err != nil {
+		return GradedAnswer{}, err
+	}
+	newPoints := int32(0)
+	if correct {
+		newPoints = question.Points
+	}
+	delta := newPoints - answer.PointsAwarded
+
+	var player db.Player
+	err = s.withTx(ctx, func(tx *Service) error {
+		if _, err := tx.q.GradeAnswer(ctx, db.GradeAnswerParams{
+			ID:            answerID,
+			IsCorrect:     pgtype.Bool{Bool: correct, Valid: true},
+			PointsAwarded: newPoints,
+		}); err != nil {
+			return err
+		}
+		if delta != 0 {
+			if err := tx.q.AddPlayerScore(ctx, db.AddPlayerScoreParams{ID: answer.PlayerID, Score: delta}); err != nil {
+				return err
+			}
+		}
+		p, err := tx.q.GetPlayerByID(ctx, answer.PlayerID)
+		if err != nil {
+			return err
+		}
+		player = p
+		return nil
+	})
+	if err != nil {
+		return GradedAnswer{}, err
+	}
+
+	return GradedAnswer{
+		ClientID:      player.ClientID,
+		QuestionID:    answer.QuestionID,
+		QuestionIndex: int(question.Position),
+		Correct:       correct,
+		PointsAwarded: int(newPoints),
+		TotalScore:    int(player.Score),
+	}, nil
+}
+
+// FreeTextAnswer is one player's submission to a free_text question, for
+// the admin's grading view.
+type FreeTextAnswer struct {
+	ID            uuid.UUID
+	ClientID      uuid.UUID
+	Nickname      string
+	Text          string
+	Graded        bool
+	Correct       bool
+	PointsAwarded int
+}
+
+// ListFreeTextAnswers returns every free-text answer submitted so far for
+// one question in this game, oldest first, for the admin to grade.
+func (s *Service) ListFreeTextAnswers(ctx context.Context, gameID, questionID uuid.UUID) ([]FreeTextAnswer, error) {
+	rows, err := s.q.ListFreeTextAnswersForQuestion(ctx, db.ListFreeTextAnswersForQuestionParams{
+		GameID: gameID, QuestionID: questionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FreeTextAnswer, 0, len(rows))
+	for _, r := range rows {
+		if !r.AnswerText.Valid {
+			continue // a multiple_choice answer, if the wrong questionID was passed
+		}
+		out = append(out, FreeTextAnswer{
+			ID:            r.ID,
+			ClientID:      r.ClientID,
+			Nickname:      r.Nickname,
+			Text:          r.AnswerText.String,
+			Graded:        r.IsCorrect.Valid,
+			Correct:       r.IsCorrect.Valid && r.IsCorrect.Bool,
+			PointsAwarded: int(r.PointsAwarded),
+		})
+	}
+	return out, nil
+}
+
+// PlayerAnswerStatus is one player's own answer to one question, if they
+// have one — used to fold "you already answered this" into a
+// question.started message. Without it, a client that receives
+// question.started for a question it already answered (resuming live
+// play after a review, or reconnecting mid-question) would show a
+// blank, re-answerable question, even though resubmitting would be
+// rejected as a duplicate.
+type PlayerAnswerStatus struct {
+	Answered         bool
+	SelectedOptionID *uuid.UUID
+	Text             *string
+	Pending          bool
+	Correct          bool
+	PointsAwarded    int
+}
+
+// GetPlayerAnswerStatus looks up clientID's own answer (if any) to
+// questionID in gameID. A player who hasn't answered, or who isn't found
+// (shouldn't normally happen for a connected client), gets the zero value
+// (Answered: false) rather than an error — the caller treats both the
+// same way.
+func (s *Service) GetPlayerAnswerStatus(ctx context.Context, gameID, clientID, questionID uuid.UUID) (PlayerAnswerStatus, error) {
+	player, err := s.q.GetPlayer(ctx, db.GetPlayerParams{GameID: gameID, ClientID: clientID})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return PlayerAnswerStatus{}, nil
+		}
+		return PlayerAnswerStatus{}, err
+	}
+	answer, err := s.q.GetAnswer(ctx, db.GetAnswerParams{QuestionID: questionID, PlayerID: player.ID})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return PlayerAnswerStatus{}, nil
+		}
+		return PlayerAnswerStatus{}, err
+	}
+
+	status := PlayerAnswerStatus{Answered: true, PointsAwarded: int(answer.PointsAwarded)}
+	if answer.SelectedOptionID.Valid {
+		id := uuid.UUID(answer.SelectedOptionID.Bytes)
+		status.SelectedOptionID = &id
+	}
+	if answer.AnswerText.Valid {
+		status.Text = &answer.AnswerText.String
+	}
+	if answer.IsCorrect.Valid {
+		status.Correct = answer.IsCorrect.Bool
+	} else {
+		status.Pending = true
+	}
+	return status, nil
 }

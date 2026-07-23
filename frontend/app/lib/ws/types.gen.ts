@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionAnswersReset, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted } from "./file";
+//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionAnswersReset, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted, YourAnswer } from "./file";
 //
 //   const answerCount = Convert.toAnswerCount(json);
 //   const answerResult = Convert.toAnswerResult(json);
@@ -19,21 +19,34 @@
 //   const questionOption = Convert.toQuestionOption(json);
 //   const questionReviewed = Convert.toQuestionReviewed(json);
 //   const questionStarted = Convert.toQuestionStarted(json);
+//   const yourAnswer = Convert.toYourAnswer(json);
 //
 // These functions will throw an error if the JSON doesn't
 // match the expected interface, even if the JSON is valid.
 
+/**
+ * Sent once when a multiple_choice answer is scored automatically. For free_text, sent
+ * twice: first right after submission with pending true (correct/pointsAwarded not yet
+ * meaningful), then again once the admin grades it by hand with pending false and the final
+ * verdict.
+ */
 export interface AnswerResult {
     correct:       boolean;
+    pending:       boolean;
     pointsAwarded: number;
     questionId:    string;
     totalScore:    number;
     [property: string]: any;
 }
 
+/**
+ * Exactly one of optionId (multiple_choice) or text (free_text, max 500 characters) must be
+ * set, matching the current question's type.
+ */
 export interface AnswerSubmit {
-    optionId:   string;
+    optionId?:  string;
     questionId: string;
+    text?:      string;
     [property: string]: any;
 }
 
@@ -51,10 +64,28 @@ export interface GameEnded {
 
 export interface LeaderboardEntry {
     clientId: string;
+    /**
+     * One of a small, curated set of cosmos-themed color IDs (see the REST API's PlayerColor
+     * schema) — not a full color range.
+     */
+    color:    Color;
     nickname: string;
     rank:     number;
     score:    number;
     [property: string]: any;
+}
+
+/**
+ * One of a small, curated set of cosmos-themed color IDs (see the REST API's PlayerColor
+ * schema) — not a full color range.
+ */
+export enum Color {
+    Comet = "comet",
+    Crimson = "crimson",
+    Nebula = "nebula",
+    Nova = "nova",
+    Quasar = "quasar",
+    Solar = "solar",
 }
 
 export interface GameStarted {
@@ -106,11 +137,16 @@ export interface QuestionAnswersReset {
     [property: string]: any;
 }
 
+/**
+ * correctOptionId is only present for multiple_choice questions — free_text questions have
+ * no automatic verdict, so answerCounts is always empty for them too. A free_text player
+ * instead receives a second answer.result once the admin grades their answer by hand.
+ */
 export interface QuestionEnded {
-    answerCounts:    AnswerCount[];
-    correctOptionId: string;
-    questionId:      string;
-    questionIndex:   number;
+    answerCounts:     AnswerCount[];
+    correctOptionId?: string;
+    questionId:       string;
+    questionIndex:    number;
     [property: string]: any;
 }
 
@@ -123,16 +159,17 @@ export interface AnswerCount {
 /**
  * A read-only recap of a previous question, sent when the admin goes back. Unlike
  * question.started, the correct answer is already known (it was already revealed), and
- * clients must not offer a way to answer it.
+ * clients must not offer a way to answer it. correctOptionId and answerCounts are only
+ * meaningful for multiple_choice — free_text has no per-option breakdown.
  */
 export interface QuestionReviewed {
-    answerCounts:    AnswerCount[];
-    correctOptionId: string;
-    options:         QuestionOption[];
-    prompt:          string;
-    questionId:      string;
-    questionIndex:   number;
-    totalQuestions:  number;
+    answerCounts:     AnswerCount[];
+    correctOptionId?: string;
+    options:          QuestionOption[];
+    prompt:           string;
+    questionId:       string;
+    questionIndex:    number;
+    totalQuestions:   number;
     [property: string]: any;
 }
 
@@ -153,6 +190,54 @@ export interface QuestionStarted {
     timed:            boolean;
     timeLimitSeconds: number;
     totalQuestions:   number;
+    /**
+     * Determines how the client should collect an answer: option buttons for multiple_choice, a
+     * text field (max 500 characters) for free_text. free_text questions always have an empty
+     * options array.
+     */
+    type:        Type;
+    yourAnswer?: YourAnswer;
+    [property: string]: any;
+}
+
+/**
+ * Determines how the client should collect an answer: option buttons for multiple_choice, a
+ * text field (max 500 characters) for free_text. free_text questions always have an empty
+ * options array.
+ */
+export enum Type {
+    FreeText = "free_text",
+    MultipleChoice = "multiple_choice",
+}
+
+/**
+ * Present on question.started only when the recipient has already answered this question —
+ * this happens when the admin resumes live play after reviewing an earlier question, or
+ * when a player reconnects mid-question, both of which redeliver question.started for a
+ * question that may not actually be fresh to this client. Its absence means the client has
+ * not answered yet.
+ */
+export interface YourAnswer {
+    /**
+     * Meaningless while pending.
+     */
+    correct?: boolean;
+    /**
+     * Set for a multiple_choice answer.
+     */
+    optionId?: string;
+    /**
+     * True for a free_text answer not yet graded by the admin.
+     */
+    pending: boolean;
+    /**
+     * Meaningless while pending.
+     */
+    pointsAwarded?: number;
+    /**
+     * Set for a free_text answer.
+     */
+    text?: string;
     [property: string]: any;
 }
 
@@ -293,6 +378,14 @@ export class Convert {
 
     public static questionStartedToJson(value: QuestionStarted): string {
         return JSON.stringify(uncast(value, r("QuestionStarted")), null, 2);
+    }
+
+    public static toYourAnswer(json: string): YourAnswer {
+        return cast(JSON.parse(json), r("YourAnswer"));
+    }
+
+    public static yourAnswerToJson(value: YourAnswer): string {
+        return JSON.stringify(uncast(value, r("YourAnswer")), null, 2);
     }
 }
 
@@ -451,13 +544,15 @@ function r(name: string) {
 const typeMap: any = {
     "AnswerResult": o([
         { json: "correct", js: "correct", typ: true },
+        { json: "pending", js: "pending", typ: true },
         { json: "pointsAwarded", js: "pointsAwarded", typ: 0 },
         { json: "questionId", js: "questionId", typ: "" },
         { json: "totalScore", js: "totalScore", typ: 0 },
     ], "any"),
     "AnswerSubmit": o([
-        { json: "optionId", js: "optionId", typ: "" },
+        { json: "optionId", js: "optionId", typ: u(undefined, "") },
         { json: "questionId", js: "questionId", typ: "" },
+        { json: "text", js: "text", typ: u(undefined, "") },
     ], "any"),
     "ErrorPayload": o([
         { json: "code", js: "code", typ: "" },
@@ -469,6 +564,7 @@ const typeMap: any = {
     ], "any"),
     "LeaderboardEntry": o([
         { json: "clientId", js: "clientId", typ: "" },
+        { json: "color", js: "color", typ: r("Color") },
         { json: "nickname", js: "nickname", typ: "" },
         { json: "rank", js: "rank", typ: 0 },
         { json: "score", js: "score", typ: 0 },
@@ -501,7 +597,7 @@ const typeMap: any = {
     ], "any"),
     "QuestionEnded": o([
         { json: "answerCounts", js: "answerCounts", typ: a(r("AnswerCount")) },
-        { json: "correctOptionId", js: "correctOptionId", typ: "" },
+        { json: "correctOptionId", js: "correctOptionId", typ: u(undefined, "") },
         { json: "questionId", js: "questionId", typ: "" },
         { json: "questionIndex", js: "questionIndex", typ: 0 },
     ], "any"),
@@ -511,7 +607,7 @@ const typeMap: any = {
     ], "any"),
     "QuestionReviewed": o([
         { json: "answerCounts", js: "answerCounts", typ: a(r("AnswerCount")) },
-        { json: "correctOptionId", js: "correctOptionId", typ: "" },
+        { json: "correctOptionId", js: "correctOptionId", typ: u(undefined, "") },
         { json: "options", js: "options", typ: a(r("QuestionOption")) },
         { json: "prompt", js: "prompt", typ: "" },
         { json: "questionId", js: "questionId", typ: "" },
@@ -530,5 +626,26 @@ const typeMap: any = {
         { json: "timed", js: "timed", typ: true },
         { json: "timeLimitSeconds", js: "timeLimitSeconds", typ: 0 },
         { json: "totalQuestions", js: "totalQuestions", typ: 0 },
+        { json: "type", js: "type", typ: r("Type") },
+        { json: "yourAnswer", js: "yourAnswer", typ: u(undefined, r("YourAnswer")) },
     ], "any"),
+    "YourAnswer": o([
+        { json: "correct", js: "correct", typ: u(undefined, true) },
+        { json: "optionId", js: "optionId", typ: u(undefined, "") },
+        { json: "pending", js: "pending", typ: true },
+        { json: "pointsAwarded", js: "pointsAwarded", typ: u(undefined, 0) },
+        { json: "text", js: "text", typ: u(undefined, "") },
+    ], "any"),
+    "Color": [
+        "comet",
+        "crimson",
+        "nebula",
+        "nova",
+        "quasar",
+        "solar",
+    ],
+    "Type": [
+        "free_text",
+        "multiple_choice",
+    ],
 };

@@ -44,14 +44,47 @@ func (e GameStatus) Valid() bool {
 	}
 }
 
+// Defines values for PlayerColor.
+const (
+	Comet   PlayerColor = "comet"
+	Crimson PlayerColor = "crimson"
+	Nebula  PlayerColor = "nebula"
+	Nova    PlayerColor = "nova"
+	Quasar  PlayerColor = "quasar"
+	Solar   PlayerColor = "solar"
+)
+
+// Valid indicates whether the value is a known member of the PlayerColor enum.
+func (e PlayerColor) Valid() bool {
+	switch e {
+	case Comet:
+		return true
+	case Crimson:
+		return true
+	case Nebula:
+		return true
+	case Nova:
+		return true
+	case Quasar:
+		return true
+	case Solar:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for QuestionType.
 const (
+	FreeText       QuestionType = "free_text"
 	MultipleChoice QuestionType = "multiple_choice"
 )
 
 // Valid indicates whether the value is a known member of the QuestionType enum.
 func (e QuestionType) Valid() bool {
 	switch e {
+	case FreeText:
+		return true
 	case MultipleChoice:
 		return true
 	default:
@@ -88,10 +121,13 @@ type AdminGameDetail struct {
 
 // AdminPlayer defines model for AdminPlayer.
 type AdminPlayer struct {
-	ClientId  openapi_types.UUID `json:"clientId"`
-	Connected bool               `json:"connected"`
-	Nickname  string             `json:"nickname"`
-	Score     int                `json:"score"`
+	ClientId openapi_types.UUID `json:"clientId"`
+
+	// Color A small, curated set of cosmos-themed color choices — not a full color picker — so every player's pick reads clearly against the dark theme and stays distinct from the app's own semantic colors.
+	Color     PlayerColor `json:"color"`
+	Connected bool        `json:"connected"`
+	Nickname  string      `json:"nickname"`
+	Score     int         `json:"score"`
 }
 
 // CreateGameRequest defines model for CreateGameRequest.
@@ -105,13 +141,13 @@ type CreateQuestionOption struct {
 	Text      string `json:"text"`
 }
 
-// CreateQuestionRequest defines model for CreateQuestionRequest.
+// CreateQuestionRequest options is required (2 or more) for multiple_choice and must be omitted (or empty) for free_text — free_text answers are always graded manually by the admin, not against a stored correct answer.
 type CreateQuestionRequest struct {
-	Options          []CreateQuestionOption `json:"options"`
-	Points           *int                   `json:"points,omitempty"`
-	Prompt           string                 `json:"prompt"`
-	TimeLimitSeconds *int                   `json:"timeLimitSeconds,omitempty"`
-	Type             QuestionType           `json:"type"`
+	Options          *[]CreateQuestionOption `json:"options,omitempty"`
+	Points           *int                    `json:"points,omitempty"`
+	Prompt           string                  `json:"prompt"`
+	TimeLimitSeconds *int                    `json:"timeLimitSeconds,omitempty"`
+	Type             QuestionType            `json:"type"`
 }
 
 // CreateQuizRequest defines model for CreateQuizRequest.
@@ -127,18 +163,42 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// FreeTextAnswer defines model for FreeTextAnswer.
+type FreeTextAnswer struct {
+	ClientId openapi_types.UUID `json:"clientId"`
+
+	// Correct Only meaningful once graded is true.
+	Correct       *bool              `json:"correct,omitempty"`
+	Graded        bool               `json:"graded"`
+	Id            openapi_types.UUID `json:"id"`
+	Nickname      string             `json:"nickname"`
+	PointsAwarded *int               `json:"pointsAwarded,omitempty"`
+	Text          string             `json:"text"`
+}
+
 // GameStatus defines model for GameStatus.
 type GameStatus string
 
+// GradeAnswerRequest defines model for GradeAnswerRequest.
+type GradeAnswerRequest struct {
+	Correct bool `json:"correct"`
+}
+
 // JoinGameRequest defines model for JoinGameRequest.
 type JoinGameRequest struct {
-	Code     string `json:"code"`
-	Nickname string `json:"nickname"`
+	Code string `json:"code"`
+
+	// Color One of PlayerColor's values, ideally — but deliberately typed as a plain string here (not $ref'd) rather than validated against the enum, so an unrecognized or omitted value falls back to a default instead of failing the whole join.
+	Color    *string `json:"color,omitempty"`
+	Nickname string  `json:"nickname"`
 }
 
 // JoinGameResponse defines model for JoinGameResponse.
 type JoinGameResponse struct {
-	Code     string             `json:"code"`
+	Code string `json:"code"`
+
+	// Color A small, curated set of cosmos-themed color choices — not a full color picker — so every player's pick reads clearly against the dark theme and stays distinct from the app's own semantic colors.
+	Color    PlayerColor        `json:"color"`
 	GameId   openapi_types.UUID `json:"gameId"`
 	Nickname string             `json:"nickname"`
 	Status   GameStatus         `json:"status"`
@@ -152,10 +212,16 @@ type Leaderboard struct {
 // LeaderboardEntry defines model for LeaderboardEntry.
 type LeaderboardEntry struct {
 	ClientId openapi_types.UUID `json:"clientId"`
-	Nickname string             `json:"nickname"`
-	Rank     int                `json:"rank"`
-	Score    int                `json:"score"`
+
+	// Color A small, curated set of cosmos-themed color choices — not a full color picker — so every player's pick reads clearly against the dark theme and stays distinct from the app's own semantic colors.
+	Color    PlayerColor `json:"color"`
+	Nickname string      `json:"nickname"`
+	Rank     int         `json:"rank"`
+	Score    int         `json:"score"`
 }
+
+// PlayerColor A small, curated set of cosmos-themed color choices — not a full color picker — so every player's pick reads clearly against the dark theme and stays distinct from the app's own semantic colors.
+type PlayerColor string
 
 // PublicGame defines model for PublicGame.
 type PublicGame struct {
@@ -300,6 +366,9 @@ type GetPublicLeaderboardParams struct {
 // CreateGameJSONRequestBody defines body for CreateGame for application/json ContentType.
 type CreateGameJSONRequestBody = CreateGameRequest
 
+// GradeAnswerJSONRequestBody defines body for GradeAnswer for application/json ContentType.
+type GradeAnswerJSONRequestBody = GradeAnswerRequest
+
 // ResetQuestionAnswersJSONRequestBody defines body for ResetQuestionAnswers for application/json ContentType.
 type ResetQuestionAnswersJSONRequestBody = ResetAnswersRequest
 
@@ -335,6 +404,9 @@ type ServerInterface interface {
 	// GetGame Get full game detail (admin view, includes correct answers)
 	// (GET /admin/games/{gameId})
 	GetGame(w http.ResponseWriter, r *http.Request, gameId GameId)
+	// GradeAnswer Manually grade one free-text answer: full points for the question if correct, none otherwise. Can be called again to change a grading mistake — the player's score is adjusted by the difference, not just added to.
+	// (POST /admin/games/{gameId}/answers/{answerId}/grade)
+	GradeAnswer(w http.ResponseWriter, r *http.Request, gameId GameId, answerId openapi_types.UUID)
 	// EndGame Force-end a game
 	// (POST /admin/games/{gameId}/end)
 	EndGame(w http.ResponseWriter, r *http.Request, gameId GameId)
@@ -347,6 +419,9 @@ type ServerInterface interface {
 	// KickPlayer Remove a player from the lobby. Only allowed before the game starts — once it's in progress, removing someone mid-round would orphan their in-flight answers and skew scoring, so this is lobby-only. A kicked player can rejoin with a fresh nickname like anyone else; this isn't a ban.
 	// (DELETE /admin/games/{gameId}/players/{clientId})
 	KickPlayer(w http.ResponseWriter, r *http.Request, gameId GameId, clientId openapi_types.UUID)
+	// ListFreeTextAnswers List every free-text answer submitted so far for one question in this game, for the admin to grade. Always empty for multiple_choice questions, which are scored automatically.
+	// (GET /admin/games/{gameId}/questions/{questionId}/answers)
+	ListFreeTextAnswers(w http.ResponseWriter, r *http.Request, gameId GameId, questionId openapi_types.UUID)
 	// ResetQuestionAnswers Wipe every player's answer to one already-asked question and reverse any points it awarded, so it can be answered again. For recovering from a mistake (e.g. the wrong option was marked correct, or the question started before everyone was ready) — not for routine use. Only questions at or before the current one can be reset.
 	// (POST /admin/games/{gameId}/reset-answers)
 	ResetQuestionAnswers(w http.ResponseWriter, r *http.Request, gameId GameId)
@@ -422,6 +497,12 @@ func (_ Unimplemented) GetGame(w http.ResponseWriter, r *http.Request, gameId Ga
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GradeAnswer Manually grade one free-text answer: full points for the question if correct, none otherwise. Can be called again to change a grading mistake — the player's score is adjusted by the difference, not just added to.
+// (POST /admin/games/{gameId}/answers/{answerId}/grade)
+func (_ Unimplemented) GradeAnswer(w http.ResponseWriter, r *http.Request, gameId GameId, answerId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // EndGame Force-end a game
 // (POST /admin/games/{gameId}/end)
 func (_ Unimplemented) EndGame(w http.ResponseWriter, r *http.Request, gameId GameId) {
@@ -443,6 +524,12 @@ func (_ Unimplemented) AdvanceGame(w http.ResponseWriter, r *http.Request, gameI
 // KickPlayer Remove a player from the lobby. Only allowed before the game starts — once it's in progress, removing someone mid-round would orphan their in-flight answers and skew scoring, so this is lobby-only. A kicked player can rejoin with a fresh nickname like anyone else; this isn't a ban.
 // (DELETE /admin/games/{gameId}/players/{clientId})
 func (_ Unimplemented) KickPlayer(w http.ResponseWriter, r *http.Request, gameId GameId, clientId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListFreeTextAnswers List every free-text answer submitted so far for one question in this game, for the admin to grade. Always empty for multiple_choice questions, which are scored automatically.
+// (GET /admin/games/{gameId}/questions/{questionId}/answers)
+func (_ Unimplemented) ListFreeTextAnswers(w http.ResponseWriter, r *http.Request, gameId GameId, questionId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -630,6 +717,41 @@ func (siw *ServerInterfaceWrapper) GetGame(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// GradeAnswer operation middleware
+func (siw *ServerInterfaceWrapper) GradeAnswer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId GameId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "answerId" -------------
+	var answerId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "answerId", chi.URLParam(r, "answerId"), &answerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "answerId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GradeAnswer(w, r, gameId, answerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // EndGame operation middleware
 func (siw *ServerInterfaceWrapper) EndGame(w http.ResponseWriter, r *http.Request) {
 
@@ -734,6 +856,41 @@ func (siw *ServerInterfaceWrapper) KickPlayer(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.KickPlayer(w, r, gameId, clientId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFreeTextAnswers operation middleware
+func (siw *ServerInterfaceWrapper) ListFreeTextAnswers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gameId" -------------
+	var gameId GameId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gameId", chi.URLParam(r, "gameId"), &gameId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gameId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "questionId" -------------
+	var questionId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "questionId", chi.URLParam(r, "questionId"), &questionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "questionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFreeTextAnswers(w, r, gameId, questionId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1405,6 +1562,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/admin/games/{gameId}/leaderboard", wrapper.GetAdminLeaderboard)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/games/{gameId}/questions/{questionId}/answers", wrapper.ListFreeTextAnswers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/games/{gameId}/answers/{answerId}/grade", wrapper.GradeAnswer)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/admin/games/{gameId}/players/{clientId}", wrapper.KickPlayer)
 	})
 	r.Group(func(r chi.Router) {
@@ -1611,6 +1774,86 @@ func (response GetGame403JSONResponse) VisitGetGameResponse(w http.ResponseWrite
 type GetGame404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response GetGame404JSONResponse) VisitGetGameResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GradeAnswerRequestObject struct {
+	GameId   GameId             `json:"gameId"`
+	AnswerId openapi_types.UUID `json:"answerId"`
+	Body     *GradeAnswerJSONRequestBody
+}
+
+type GradeAnswerResponseObject interface {
+	VisitGradeAnswerResponse(w http.ResponseWriter) error
+}
+
+type GradeAnswer200JSONResponse FreeTextAnswer
+
+func (response GradeAnswer200JSONResponse) VisitGradeAnswerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GradeAnswer400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GradeAnswer400JSONResponse) VisitGradeAnswerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GradeAnswer401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GradeAnswer401JSONResponse) VisitGradeAnswerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GradeAnswer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GradeAnswer403JSONResponse) VisitGradeAnswerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GradeAnswer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GradeAnswer404JSONResponse) VisitGradeAnswerResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1897,6 +2140,71 @@ func (response KickPlayer409JSONResponse) VisitKickPlayerResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFreeTextAnswersRequestObject struct {
+	GameId     GameId             `json:"gameId"`
+	QuestionId openapi_types.UUID `json:"questionId"`
+}
+
+type ListFreeTextAnswersResponseObject interface {
+	VisitListFreeTextAnswersResponse(w http.ResponseWriter) error
+}
+
+type ListFreeTextAnswers200JSONResponse []FreeTextAnswer
+
+func (response ListFreeTextAnswers200JSONResponse) VisitListFreeTextAnswersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFreeTextAnswers401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListFreeTextAnswers401JSONResponse) VisitListFreeTextAnswersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFreeTextAnswers403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListFreeTextAnswers403JSONResponse) VisitListFreeTextAnswersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFreeTextAnswers404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListFreeTextAnswers404JSONResponse) VisitListFreeTextAnswersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3026,6 +3334,9 @@ type StrictServerInterface interface {
 	// GetGame Get full game detail (admin view, includes correct answers)
 	// (GET /admin/games/{gameId})
 	GetGame(ctx context.Context, request GetGameRequestObject) (GetGameResponseObject, error)
+	// GradeAnswer Manually grade one free-text answer: full points for the question if correct, none otherwise. Can be called again to change a grading mistake — the player's score is adjusted by the difference, not just added to.
+	// (POST /admin/games/{gameId}/answers/{answerId}/grade)
+	GradeAnswer(ctx context.Context, request GradeAnswerRequestObject) (GradeAnswerResponseObject, error)
 	// EndGame Force-end a game
 	// (POST /admin/games/{gameId}/end)
 	EndGame(ctx context.Context, request EndGameRequestObject) (EndGameResponseObject, error)
@@ -3038,6 +3349,9 @@ type StrictServerInterface interface {
 	// KickPlayer Remove a player from the lobby. Only allowed before the game starts — once it's in progress, removing someone mid-round would orphan their in-flight answers and skew scoring, so this is lobby-only. A kicked player can rejoin with a fresh nickname like anyone else; this isn't a ban.
 	// (DELETE /admin/games/{gameId}/players/{clientId})
 	KickPlayer(ctx context.Context, request KickPlayerRequestObject) (KickPlayerResponseObject, error)
+	// ListFreeTextAnswers List every free-text answer submitted so far for one question in this game, for the admin to grade. Always empty for multiple_choice questions, which are scored automatically.
+	// (GET /admin/games/{gameId}/questions/{questionId}/answers)
+	ListFreeTextAnswers(ctx context.Context, request ListFreeTextAnswersRequestObject) (ListFreeTextAnswersResponseObject, error)
 	// ResetQuestionAnswers Wipe every player's answer to one already-asked question and reverse any points it awarded, so it can be answered again. For recovering from a mistake (e.g. the wrong option was marked correct, or the question started before everyone was ready) — not for routine use. Only questions at or before the current one can be reset.
 	// (POST /admin/games/{gameId}/reset-answers)
 	ResetQuestionAnswers(ctx context.Context, request ResetQuestionAnswersRequestObject) (ResetQuestionAnswersResponseObject, error)
@@ -3213,6 +3527,40 @@ func (sh *strictHandler) GetGame(w http.ResponseWriter, r *http.Request, gameId 
 	}
 }
 
+// GradeAnswer operation middleware
+func (sh *strictHandler) GradeAnswer(w http.ResponseWriter, r *http.Request, gameId GameId, answerId openapi_types.UUID) {
+	var request GradeAnswerRequestObject
+
+	request.GameId = gameId
+	request.AnswerId = answerId
+
+	var body GradeAnswerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GradeAnswer(ctx, request.(GradeAnswerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GradeAnswer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GradeAnswerResponseObject); ok {
+		if err := validResponse.VisitGradeAnswerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // EndGame operation middleware
 func (sh *strictHandler) EndGame(w http.ResponseWriter, r *http.Request, gameId GameId) {
 	var request EndGameRequestObject
@@ -3311,6 +3659,33 @@ func (sh *strictHandler) KickPlayer(w http.ResponseWriter, r *http.Request, game
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(KickPlayerResponseObject); ok {
 		if err := validResponse.VisitKickPlayerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListFreeTextAnswers operation middleware
+func (sh *strictHandler) ListFreeTextAnswers(w http.ResponseWriter, r *http.Request, gameId GameId, questionId openapi_types.UUID) {
+	var request ListFreeTextAnswersRequestObject
+
+	request.GameId = gameId
+	request.QuestionId = questionId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFreeTextAnswers(ctx, request.(ListFreeTextAnswersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFreeTextAnswers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFreeTextAnswersResponseObject); ok {
+		if err := validResponse.VisitListFreeTextAnswersResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3821,60 +4196,72 @@ func (sh *strictHandler) GetPublicLeaderboard(w http.ResponseWriter, r *http.Req
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"AAD//w==",
+	"7Fzrbtu6ln6VBc0AaQHZTnf75+T8yulpi57Ts3vd0wHaYG9aXLbYUKRCUnHdIMA8xDzhPMmAF91sypcm",
+	"zu6k8yuxJJKL6/Jx3aSrJJNFKQUKo5OTq6QkihRoULlfTzlDYV5S+z8TyUmSI6GokjQRpMDkJPnPkX9k",
+	"9JImaaLwomIKaXJiVIVporMcC2IHz6QqiElOkqpi9kmzLO1wbRQT8+T6Ok1ekAI7C5XE5O0yc3/zZiu8",
+	"Lg2TgvA9N7XPEm8r1HaRwY1ctA/cbDNvK/Ztwyru5k1WuLaDdSmFRqcJfyP0HTrq7a9MCoPC/UvKkrOM",
+	"2E1Nvmgp7LV2mX9XOEtOkn+btFo28Xf15JlSUvmlKOpMMSef5MSuBSosdp0mT6WYcZbdwcL1ShoWzOSQ",
+	"VUqhMKBQy0plCNoQg5ak51JNGaUoDk/TfxDOKBh5jgKmlYGCac3EHEyOUIsXlOSOrl+leS4rQQ9P1q/S",
+	"wMwtdZ0mvwlSmVwq9g3vYOl/BQ5IBUxcOvZMkShUnkvOPMIkdo1TWjDxwhnGVVIqWaIyzCt1Jqm7uqL8",
+	"aZIpJAbpqemZCiUGR4YVuG4vaRKUpUEAQfGrHS0qzsmUY22CYSATBueo7EhGdzDINCk5WaJ6KivP2PV5",
+	"LhpI2DqXffQDMzy+e6vmld4mH8vS9/7J6zQx0hBeb17HCLzuwtGnxBHWAFVLUOql0lAxwNm1FfsM6orw",
+	"rGGAnH7BzGFKoxR/R0MYd5rK+etZcvJp865bbbpOV9XJE+D+ZQaLrRx0c71xgxwLPZFEKbJcY1c99/pm",
+	"zurthJnWtbxz3m3VjExyqbYR/iZw2j7qxgiBmfG2H2acSsmRCHtbsOxcBPtb17VMKtxBXZpNdOarR3cp",
+	"qHcQE/pTpxJWeJ2jrM+rnW1ohbwwbnjVWlFfBxRbXZjpp1IpzEychwa/ujsFE69QzE2enDzaRpMbk3Zm",
+	"3k5dhy99zJXuHw1Mt4fOg18sBBdS4UOY2f8qbljJ8fcslyxDIIJCUWkDUwRZMGPsGKkAi9Is/ZCZQvzd",
+	"0gn/81//3flFhF6g0kAUAuELstQwV4QihYKIinC+hOnSHYHEan4KQhogc8KENkBAG2kJzPy+w2zjz8KC",
+	"RI/rYVs7W2xUlmummyalZMGfpjgjFTfJyaPj4+MY+pdKFuV22aaJPXhesYKZ95hJQfuzP47O7a9s3lK9",
+	"mQ/22TUVshcbGjfpD/s2aFM9TbqKb4z2dtM7KbtWUB9Ze5mBGxSj3XsYu3sFBWpN5rF7q2DlT7D6+dja",
+	"zxXiB/xqTp1u3hi0G+jom+1rwZdQIBFMzGcVBykyrC2JabB8HicxTvtn4li0o7+yEfa9gZwuiOov01Xe",
+	"AHmbWe3Wjh8OAf/CVmJC6LgwJ1cJiqqwU3I5nS4tcIrfSyXnCrX1LlD0Z2n38sIu4OU4aAPZMLiv6c4w",
+	"WP9Det9jwzJDDm19rK/qB4KcQec8P9JwSXiFOgVG0SGthWYbeVDkbIqKGORLsCtQIBoIlJwwAX4tyFEh",
+	"PLBwbEHniD4ERUxuffOcCHDeunXLGrC2GG4Zn4KWQARUQmEm58KGEvZ4qQ8ORxTMCOcapiQ7ByOBQEAM",
+	"sFMhoXYvM8J4HR8tcskRvkgmPPhv1NGCfK0x5fEv6V4QE+y9mW2z7HxU/T3C28MnmzfplJsZ6v6xwApv",
+	"mtTNqlvfsdRhl+2VS81MJVF0nWEojKrdp11O785kz4RRy61Od73AFsr8ZHfvd28UnCLiPA6st+Nyu/k3",
+	"ia5L7BrwnIIuCOcpZJVyeKDRWOvNpC6kHpkcC+fAcanAu5Pa4ZDz82BWcR5uliw7R+XuaQl4iWoJPlY6",
+	"0u4mKCRUQ8aRKL7s4Q4l6hzcUs5X1cb6mZRpw0RmYKZk4V3MsjzSIBcCNBZEGJb5tbUHlfrYEDitOHEs",
+	"KdAePEJeEhfaEk2U5Zzk7m+mWKGliJ4lb6opZ9me2YqdMgO3Ge7H4a8bwzdW3qUtpiW1+xmJiHYznH1d",
+	"+L7z/pGZPLhgG934iN8uNVtxaaNefTT3siMoxFz+A3j5/VRM3+fvbDRCT8OiVg6bhDwY/O7Ijt09Qvfo",
+	"dlI64t85A7QW/e0Vyq8SuyE4P+uQ+yHIuAablVg7SZMmeI7iig3QIoiyf5pzWzDHdk1A+n1tAK1OWNg9",
+	"OT7m6PzJegYNTIDJmQarwaBzuQACmZ2XWsw2MpwHegwfcxTWh9SYtskDKIk9Xexv66u0GQZXAxASLCFQ",
+	"2jCgUugW6LuTsQB1bcNVSfdjdVSrA7r2uVezqpvz7C4YNwP2bd/Up9OhdXW/6CZ994Lgrf5XO3XcOt6h",
+	"VBRVkwTekNary259KrdDzi7k2VljTH6HGkOAvwNpdcFgpdgREmjE2GhoijOpsNHVI93UqOppgNl5bFBf",
+	"MMEKixaR1NDQRhwN8a1cMlxE0oT/FzfzmzONrZs5fHLwlrOBEcYM7v028nU3SNCt0GW9UMwqxczyveWm",
+	"J8RX9U4rO0v963ltsf/4+CFZrQz+E5cZl+R8xLSukALJMtTalwX/ChnhHJVPSeeSU6d5f9hTY+QOgj9s",
+	"qMALV0wd14V/t0G3cgsPuTGlL0wyMZPrav7u2fsPcPrmpUtx20UsuwupwSh2ycikrKYjd1h1iqPjBt5P",
+	"kvrx0zcvkzS5RKX9vMfjR+Nj7/OiICVLTpLH4+PxY+uGEZM7nk3cVibWoNzvORqvy6hI3ZmQvGLavHBP",
+	"pL2Gj0+hm+CiQrVs2wkaZ363wm0vUjhb6SP45fh4rwrx7oW0UJRbhey18rHf+HWaPDl+NDRxQ/KkV9p2",
+	"gx5vH9S2B3Q12/G3q9Ofzix7dFUURC2DWLwPolHrUNU0ZK7rPIpOznzkEZFpW9wKfR+ozd8kXd5aPX69",
+	"enbdh16jKrxeE/ejWyOgI+W4VCH4P15Ox9vl1GlquSt9sCOebB/RNHLspUBeREB6SuQTGcS5xxF9uk57",
+	"mDG58gm760HweIGm0bIbGPZOkg4u6pC8abh9H2T3Ao3Pa83bncEDH6FY3ysFJjJeUdQrdU39MI4SfVyP",
+	"kdw+Mgndd86rjqrDJCw2ufL/2EuusrLaNLj7Wmm0d62e/kbda2dDKNmp1RwIJiPVoJ1w8vasZ6W0GDEe",
+	"fycUAn9atPxXHeg7PoAU6DoQRp0OhBNvkt5jb9y5NjyZ1baYgrDjpclRLZjGMTwlwoY6zukM5S4wErKc",
+	"iLmDaEUoE3MomDbkHF0G207eJK9doh2YBkK/VNogrVseKJvNUKHI0Pc92LtAKEUKRobMxI4gP0HfK/id",
+	"YDFkZc8EvbMjYvBw8AXbe6Gpz6XKcISChqN9HwnzfgVt6Eh3/OxW2w4ou+4yEen1bt8H8XU2BFqQUueu",
+	"eVZ1cpCU6Lzm++HPcoFfzeiiW3m5Xfs/pZdEZPjnYwDxhPzAemQH/GX7gKYHfi/FeyZ8kmMtr0YslHje",
+	"2EPJPmN1wp6BKUhlsbNNiLMZ4NecuDNoH+QJaffJVV1IvvapEo4G13Xmnyw7Dx2sayrzZD3H4h8FhYW8",
+	"/Gnl+87t3rfgWG40JWvXwjQG1/5FOJcL6z30062gDVHGV9VdWxgzR66WUvc8pZ651kfRskDr3hSMjpTd",
+	"FyxkxSlIVeZE2CmZAiZGM87mead7U1DQ57hwrgwTc9fj40o1THsSR1Lw5RhO4Zxl50jrfWREgMIvkglf",
+	"hCHWMdM51G0IwNk5AhFLSxRyjX+tpxVHBghMiej7QU339HeDaTxY6bRI3CBYGbSgpv4xuWprDU0otjG9",
+	"1w8CdHIXabjVwGN7Lu75ir+tU5CcojYwY+q+xBkurec7U1bjC9DVNDS4aQkzopxbYLW6UwLxum11Il3x",
+	"Goz0scsYTn2TtGutjjZjN6qUwiJnWe5aq12IQYFURhbEMBurLOMBxO2azS29BTdsOAo1mlHHTm7ZwXGV",
+	"vbrS0zWx288nxIqId5xQ2OhnBdLAsfxe5RIOenR/ZCWutqsFTDDSIQDhCgldjoi2J2PPdVN2oHYnYJ2b",
+	"YAaI76Z2pywz7hCdYpi0TkGM4bm0XlMmL9H164bkcJ2FeIDj+dj3ziop5uBroLAgGgqiztuXKpyb2EuG",
+	"OH+i9TPc3uw+7Fi3k4dNB58FKCUrwwRCpTE4Km1Hx1p9uHZg7XxhX07f9sx2KFfFPmTk06+THwwSYsX4",
+	"HwkUatpA4WiqJKEZ0abTivP/OLG7iz/yLU1iCBBarnq7wpAc7Niy9xbqYBiMtL6G9ja8IBY+jLSgQEo3",
+	"BScGM1mg0g/H8CH46wTKSiG00rTGzAwIa+igUJYodB8R7FzdWMA/6jOgutv3QTJTEb4Wpjok+5y4yLS+",
+	"9jmpXwizWsxEhdpj2CJHB4vA2aXPorpyPl8C098JMNbKkO6JMQ4GD4As7+28f35GJaD8T2qNTgh1ffWB",
+	"C2Fh9Lk6Pn6M0Hld6OFGhbmo2LdvW7oz3oZn7iJsC319W4O1mqYftnXiomFazfz6yra2ibe+Nn64tolu",
+	"w9Udt0148cbF2e+Y+MFk2nQzrHQutEJds6nJlW9j35hp/Lu73oh8W6bRP35PShF+M5t4mg6WiOIcO75V",
+	"RR1u+KhR6n50engB+OwmM7p1TYbAay9nInwcyDkTxGT5ujjbNtADwd56n+kdxydDsOcJo94A7oU++R19",
+	"H05Oet37G9yRVj3vwiEZfD9gMNLU9yhX7CV5pLtJWybAvevQk2/zdsSNEGKjX3TQREb84yN37h/V2rYh",
+	"j/Gzd5aeUurUss05ROCmVcddAGfi9XnvSLmrulU0Bdd/KehgSbj4u0cHOOYOB5oWVgQuArT8rModRBnB",
+	"3Zuod7dku0s40kHanzUkaVgQP+KGA5Mh3h3f6Slxv8KTLcL4PtBOd3iyqQ3vEL8c1D2Jvyd453HMsOK1",
+	"sUxXAX9CBO+EQBvV1gK3z9d/kczX/6Leb/2xnmRfPW++LexffLt9nVz9BNQda+PaV4wiWmmfuYGrfPhs",
+	"f6M2ltI6mz9dukSMazrLJMWV7rlFznineY6Fzw6EVrvhLjqQCnKifTd66lt5FJpKCQ1Pjv8y1KbWKuqV",
+	"JWbj21idb8bEX+dc6VnzX2sZbruJvExzMH3q0D5YcQri+j4EaWTtVwIu5XlVgpx15N7IfCdR7NpR7xfs",
+	"t9QfQDrbT9S1754fVKL7NvffXKKR7vq4IN2Joi5r7leKJyfJhJTMcSQMuOp+RN2Xu65W+9Z6F+fhfeLm",
+	"QtPjcHb9vwEAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

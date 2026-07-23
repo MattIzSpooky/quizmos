@@ -162,15 +162,24 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 		for i, o := range question.Options {
 			options[i] = QuestionOption{ID: o.ID.String(), Text: o.Text}
 		}
-		h.sendTo(c, TypeQuestionStarted, QuestionStarted{
+		payload := QuestionStarted{
 			QuestionIndex:    int64(question.Position),
 			QuestionID:       question.ID.String(),
+			Type:             Type(question.Type),
 			Prompt:           question.Prompt,
 			Options:          options,
 			Timed:            quiz.Timed,
 			TimeLimitSeconds: int64(question.TimeLimitSeconds),
 			TotalQuestions:   int64(total),
-		})
+		}
+		// A reconnecting client (dropped connection, page refresh) might
+		// already have answered this exact question — without folding
+		// that in, they'd see a blank, re-answerable question and a
+		// resubmission would be silently rejected as a duplicate.
+		if status, err := h.svc.GetPlayerAnswerStatus(ctx, game.ID, c.clientID, question.ID); err == nil {
+			applyYourAnswer(&payload, status)
+		}
+		h.sendTo(c, TypeQuestionStarted, payload)
 	case "ended":
 		leaderboard, err := h.svc.Leaderboard(ctx, game.ID)
 		if err != nil {
@@ -183,6 +192,7 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 				Nickname: e.Nickname,
 				Score:    int64(e.Score),
 				Rank:     int64(e.Rank),
+				Color:    Color(e.Color),
 			}
 		}
 		h.sendTo(c, TypeGameEnded, GameEnded{FinalLeaderboard: entries, EndedAt: game.EndedAt.Time})
@@ -195,12 +205,13 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 // be a cycle.
 func questionReviewedPayload(q service.QuestionWithOptions, total int, counts map[uuid.UUID]int) QuestionReviewed {
 	options := make([]QuestionOption, len(q.Options))
-	var correctID string
+	var correctID *string
 	answerCounts := make([]AnswerCount, 0, len(q.Options))
 	for i, o := range q.Options {
 		options[i] = QuestionOption{ID: o.ID.String(), Text: o.Text}
 		if o.IsCorrect {
-			correctID = o.ID.String()
+			id := o.ID.String()
+			correctID = &id
 		}
 		answerCounts = append(answerCounts, AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
 	}
@@ -269,14 +280,23 @@ func (h *Hub) handleMessage(ctx context.Context, gameID uuid.UUID, c *client, en
 }
 
 func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *client, submit AnswerSubmit) {
-	questionID, err1 := uuid.Parse(submit.QuestionID)
-	optionID, err2 := uuid.Parse(submit.OptionID)
-	if err1 != nil || err2 != nil {
-		h.sendError(c, "bad_request", "questionId/optionId must be UUIDs")
+	questionID, err := uuid.Parse(submit.QuestionID)
+	if err != nil {
+		h.sendError(c, "bad_request", "questionId must be a UUID")
 		return
 	}
 
-	result, err := h.svc.SubmitAnswer(ctx, gameID, c.clientID, questionID, optionID)
+	var optionID *uuid.UUID
+	if submit.OptionID != nil {
+		id, err := uuid.Parse(*submit.OptionID)
+		if err != nil {
+			h.sendError(c, "bad_request", "optionId must be a UUID")
+			return
+		}
+		optionID = &id
+	}
+
+	result, err := h.svc.SubmitAnswer(ctx, gameID, c.clientID, questionID, optionID, submit.Text)
 	if err != nil {
 		h.sendError(c, "answer_rejected", err.Error())
 		return
@@ -287,6 +307,7 @@ func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *clien
 		Correct:       result.Correct,
 		PointsAwarded: int64(result.PointsAwarded),
 		TotalScore:    int64(result.TotalScore),
+		Pending:       result.Pending,
 	})
 }
 
@@ -340,6 +361,26 @@ func (h *Hub) ConnectedClientIDs(gameID uuid.UUID) map[string]bool {
 		out[id.String()] = true
 	}
 	return out
+}
+
+// SendToClient unicasts payload to one specific client in gameID's room, if
+// they're currently connected — a no-op otherwise (e.g. they submitted a
+// free-text answer and then closed the tab before the admin got to
+// grading it). Exported for REST admin handlers, mirroring Broadcast.
+func (h *Hub) SendToClient(gameID, clientID uuid.UUID, msgType string, payload any) {
+	h.mu.RLock()
+	rm, ok := h.rooms[gameID]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	rm.mu.RLock()
+	c, ok := rm.clients[clientID]
+	rm.mu.RUnlock()
+	if !ok {
+		return
+	}
+	h.sendTo(c, msgType, payload)
 }
 
 // Kick disconnects a specific client from a game's room, if they're
@@ -416,4 +457,64 @@ func (h *Hub) Broadcast(gameID uuid.UUID, msgType string, payload any) {
 	}
 
 	h.broadcastToRoom(rm, msgType, payload)
+}
+
+// BroadcastQuestionStarted sends question.started to every client
+// currently connected to gameID's room, personalizing each recipient's
+// copy with their own existing answer to the question, if they have one
+// (see PlayerAnswerStatus). Plain Broadcast is fine for a genuinely new
+// question — nobody could have answered it yet — but resuming live play
+// after a review redelivers question.started for a question that isn't
+// actually fresh to everyone in the room, and without this they'd see a
+// blank, re-answerable question client-side even though resubmitting
+// would be rejected as a duplicate answer.
+func (h *Hub) BroadcastQuestionStarted(ctx context.Context, gameID uuid.UUID, base QuestionStarted) {
+	rm := h.roomFor(gameID)
+	rm.mu.Lock()
+	rm.reviewing = nil
+	rm.mu.Unlock()
+
+	rm.mu.RLock()
+	clients := make([]*client, 0, len(rm.clients))
+	for _, c := range rm.clients {
+		clients = append(clients, c)
+	}
+	rm.mu.RUnlock()
+
+	questionID, err := uuid.Parse(base.QuestionID)
+	if err != nil {
+		h.broadcastToRoom(rm, TypeQuestionStarted, base)
+		return
+	}
+
+	for _, c := range clients {
+		payload := base
+		if status, err := h.svc.GetPlayerAnswerStatus(ctx, gameID, c.clientID, questionID); err == nil {
+			applyYourAnswer(&payload, status)
+		}
+		h.sendTo(c, TypeQuestionStarted, payload)
+	}
+}
+
+// applyYourAnswer folds a player's existing answer (if any) into their
+// copy of a question.started payload.
+func applyYourAnswer(payload *QuestionStarted, status service.PlayerAnswerStatus) {
+	if !status.Answered {
+		return
+	}
+	ya := &YourAnswer{Pending: status.Pending}
+	if status.SelectedOptionID != nil {
+		id := status.SelectedOptionID.String()
+		ya.OptionID = &id
+	}
+	if status.Text != nil {
+		ya.Text = status.Text
+	}
+	if !status.Pending {
+		correct := status.Correct
+		points := int64(status.PointsAwarded)
+		ya.Correct = &correct
+		ya.PointsAwarded = &points
+	}
+	payload.YourAnswer = ya
 }

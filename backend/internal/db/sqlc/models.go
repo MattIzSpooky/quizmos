@@ -14,10 +14,11 @@ type Answer struct {
 	GameID           uuid.UUID          `json:"game_id"`
 	QuestionID       uuid.UUID          `json:"question_id"`
 	PlayerID         uuid.UUID          `json:"player_id"`
-	SelectedOptionID uuid.UUID          `json:"selected_option_id"`
-	IsCorrect        bool               `json:"is_correct"`
+	SelectedOptionID pgtype.UUID        `json:"selected_option_id"`
+	IsCorrect        pgtype.Bool        `json:"is_correct"`
 	PointsAwarded    int32              `json:"points_awarded"`
 	AnsweredAt       pgtype.Timestamptz `json:"answered_at"`
+	AnswerText       pgtype.Text        `json:"answer_text"`
 }
 
 type Game struct {
@@ -39,6 +40,7 @@ type Player struct {
 	Nickname string             `json:"nickname"`
 	Score    int32              `json:"score"`
 	JoinedAt pgtype.Timestamptz `json:"joined_at"`
+	Color    string             `json:"color"`
 }
 
 type Question struct {

@@ -51,6 +51,9 @@
 //
 //    questionStarted, err := UnmarshalQuestionStarted(bytes)
 //    bytes, err = questionStarted.Marshal()
+//
+//    yourAnswer, err := UnmarshalYourAnswer(bytes)
+//    bytes, err = yourAnswer.Marshal()
 
 package ws
 
@@ -228,16 +231,34 @@ func (r *QuestionStarted) Marshal() ([]byte, error) {
 	return json.Marshal(r)
 }
 
+func UnmarshalYourAnswer(data []byte) (YourAnswer, error) {
+	var r YourAnswer
+	err := json.Unmarshal(data, &r)
+	return r, err
+}
+
+func (r *YourAnswer) Marshal() ([]byte, error) {
+	return json.Marshal(r)
+}
+
+// Sent once when a multiple_choice answer is scored automatically. For free_text, sent
+// twice: first right after submission with pending true (correct/pointsAwarded not yet
+// meaningful), then again once the admin grades it by hand with pending false and the final
+// verdict.
 type AnswerResult struct {
 	Correct       bool   `json:"correct"`
+	Pending       bool   `json:"pending"`
 	PointsAwarded int64  `json:"pointsAwarded"`
 	QuestionID    string `json:"questionId"`
 	TotalScore    int64  `json:"totalScore"`
 }
 
+// Exactly one of optionId (multiple_choice) or text (free_text, max 500 characters) must be
+// set, matching the current question's type.
 type AnswerSubmit struct {
-	OptionID   string `json:"optionId"`
-	QuestionID string `json:"questionId"`
+	OptionID   *string `json:"optionId,omitempty"`
+	QuestionID string  `json:"questionId"`
+	Text       *string `json:"text,omitempty"`
 }
 
 type ErrorPayload struct {
@@ -251,10 +272,13 @@ type GameEnded struct {
 }
 
 type LeaderboardEntry struct {
-	ClientID string `json:"clientId"`
-	Nickname string `json:"nickname"`
-	Rank     int64  `json:"rank"`
-	Score    int64  `json:"score"`
+	ClientID                                                                                 string `json:"clientId"`
+	// One of a small, curated set of cosmos-themed color IDs (see the REST API's PlayerColor       
+	// schema) — not a full color range.                                                            
+	Color                                                                                    Color  `json:"color"`
+	Nickname                                                                                 string `json:"nickname"`
+	Rank                                                                                     int64  `json:"rank"`
+	Score                                                                                    int64  `json:"score"`
 }
 
 type GameStarted struct {
@@ -295,9 +319,12 @@ type QuestionAnswersReset struct {
 	QuestionIndex int64  `json:"questionIndex"`
 }
 
+// correctOptionId is only present for multiple_choice questions — free_text questions have
+// no automatic verdict, so answerCounts is always empty for them too. A free_text player
+// instead receives a second answer.result once the admin grades their answer by hand.
 type QuestionEnded struct {
 	AnswerCounts    []AnswerCount `json:"answerCounts"`
-	CorrectOptionID string        `json:"correctOptionId"`
+	CorrectOptionID *string       `json:"correctOptionId,omitempty"`
 	QuestionID      string        `json:"questionId"`
 	QuestionIndex   int64         `json:"questionIndex"`
 }
@@ -309,10 +336,11 @@ type AnswerCount struct {
 
 // A read-only recap of a previous question, sent when the admin goes back. Unlike
 // question.started, the correct answer is already known (it was already revealed), and
-// clients must not offer a way to answer it.
+// clients must not offer a way to answer it. correctOptionId and answerCounts are only
+// meaningful for multiple_choice — free_text has no per-option breakdown.
 type QuestionReviewed struct {
 	AnswerCounts    []AnswerCount    `json:"answerCounts"`
-	CorrectOptionID string           `json:"correctOptionId"`
+	CorrectOptionID *string          `json:"correctOptionId,omitempty"`
 	Options         []QuestionOption `json:"options"`
 	Prompt          string           `json:"prompt"`
 	QuestionID      string           `json:"questionId"`
@@ -326,12 +354,58 @@ type QuestionOption struct {
 }
 
 type QuestionStarted struct {
-	Options                                                         []QuestionOption `json:"options"`
-	Prompt                                                          string           `json:"prompt"`
-	QuestionID                                                      string           `json:"questionId"`
-	QuestionIndex                                                   int64            `json:"questionIndex"`
-	// Whether the client should show a countdown for this question.                 
-	Timed                                                           bool             `json:"timed"`
-	TimeLimitSeconds                                                int64            `json:"timeLimitSeconds"`
-	TotalQuestions                                                  int64            `json:"totalQuestions"`
+	Options                                                                                     []QuestionOption `json:"options"`
+	Prompt                                                                                      string           `json:"prompt"`
+	QuestionID                                                                                  string           `json:"questionId"`
+	QuestionIndex                                                                               int64            `json:"questionIndex"`
+	// Whether the client should show a countdown for this question.                                             
+	Timed                                                                                       bool             `json:"timed"`
+	TimeLimitSeconds                                                                            int64            `json:"timeLimitSeconds"`
+	TotalQuestions                                                                              int64            `json:"totalQuestions"`
+	// Determines how the client should collect an answer: option buttons for multiple_choice, a                 
+	// text field (max 500 characters) for free_text. free_text questions always have an empty                   
+	// options array.                                                                                            
+	Type                                                                                        Type             `json:"type"`
+	YourAnswer                                                                                  *YourAnswer      `json:"yourAnswer,omitempty"`
 }
+
+// Present on question.started only when the recipient has already answered this question —
+// this happens when the admin resumes live play after reviewing an earlier question, or
+// when a player reconnects mid-question, both of which redeliver question.started for a
+// question that may not actually be fresh to this client. Its absence means the client has
+// not answered yet.
+type YourAnswer struct {
+	// Meaningless while pending.                                      
+	Correct                                                    *bool   `json:"correct,omitempty"`
+	// Set for a multiple_choice answer.                               
+	OptionID                                                   *string `json:"optionId,omitempty"`
+	// True for a free_text answer not yet graded by the admin.        
+	Pending                                                    bool    `json:"pending"`
+	// Meaningless while pending.                                      
+	PointsAwarded                                              *int64  `json:"pointsAwarded,omitempty"`
+	// Set for a free_text answer.                                     
+	Text                                                       *string `json:"text,omitempty"`
+}
+
+// One of a small, curated set of cosmos-themed color IDs (see the REST API's PlayerColor
+// schema) — not a full color range.
+type Color string
+
+const (
+	Comet   Color = "comet"
+	Crimson Color = "crimson"
+	Nebula  Color = "nebula"
+	Nova    Color = "nova"
+	Quasar  Color = "quasar"
+	Solar   Color = "solar"
+)
+
+// Determines how the client should collect an answer: option buttons for multiple_choice, a
+// text field (max 500 characters) for free_text. free_text questions always have an empty
+// options array.
+type Type string
+
+const (
+	FreeText       Type = "free_text"
+	MultipleChoice Type = "multiple_choice"
+)

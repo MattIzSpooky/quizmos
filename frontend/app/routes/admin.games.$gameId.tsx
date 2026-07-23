@@ -7,9 +7,11 @@ import { AdminHeader } from "../components/AdminHeader";
 import { Constellation } from "../components/Constellation";
 import { QrCode } from "../components/QrCode";
 import { Button, Panel } from "../components/ui";
+import { playerColorHex } from "../lib/playerColors";
 
 type AdminGameDetail = components["schemas"]["AdminGameDetail"];
 type Question = components["schemas"]["Question"];
+type FreeTextAnswer = components["schemas"]["FreeTextAnswer"];
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "Quizmos Admin — Live game" }];
@@ -33,6 +35,7 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
   // admin's own view has to track "what's on screen right now" separately
   // from `game.currentQuestionIndex`. null means "follow live play".
   const [viewedIndex, setViewedIndex] = useState<number | null>(null);
+  const [freeTextAnswers, setFreeTextAnswers] = useState<FreeTextAnswer[] | null>(null);
   // A ref (not just the `busy` state) guards against a double-click
   // landing before React has re-rendered the disabled button: the ref is
   // checked synchronously, so the second click is dropped even within
@@ -76,6 +79,35 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
   const displayedIndex = viewedIndex ?? game?.currentQuestionIndex ?? 0;
   const displayedQuestion = questions?.[displayedIndex];
   const isReviewing = viewedIndex != null && viewedIndex !== game?.currentQuestionIndex;
+
+  async function loadFreeTextAnswers(questionId: string) {
+    const { data } = await adminApi.GET("/admin/games/{gameId}/questions/{questionId}/answers", {
+      params: { path: { gameId, questionId } },
+    });
+    if (data) setFreeTextAnswers(data);
+  }
+
+  // Polls the current free_text question's submissions so new answers show
+  // up for grading without the admin needing to refresh anything.
+  useEffect(() => {
+    if (game?.status !== "in_progress" || displayedQuestion?.type !== "free_text") {
+      setFreeTextAnswers(null);
+      return;
+    }
+    const questionId = displayedQuestion.id;
+    loadFreeTextAnswers(questionId);
+    const interval = setInterval(() => loadFreeTextAnswers(questionId), 2000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.status, displayedQuestion?.id, displayedQuestion?.type]);
+
+  async function gradeAnswer(answerId: string, correct: boolean) {
+    await adminApi.POST("/admin/games/{gameId}/answers/{answerId}/grade", {
+      params: { path: { gameId, answerId } },
+      body: { correct },
+    });
+    if (displayedQuestion) await loadFreeTextAnswers(displayedQuestion.id);
+  }
 
   async function start() {
     await withLock(async () => {
@@ -140,6 +172,7 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
       score: p.score,
       rank: i + 1,
       connected: p.connected,
+      color: p.color,
     }));
 
   return (
@@ -226,6 +259,65 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
         {game.status === "ended" && <p className="mt-6 text-sm text-dim">This game has ended.</p>}
       </Panel>
 
+      {game.status === "in_progress" && displayedQuestion?.type === "free_text" && (
+        <section className="mt-8">
+          <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-dim">
+            Free-text answers — grade each one
+          </h2>
+          <Panel className="flex flex-col divide-y divide-void-3">
+            {!freeTextAnswers || freeTextAnswers.length === 0 ? (
+              <p className="px-4 py-6 text-center text-sm text-dim">
+                No answers submitted yet.
+              </p>
+            ) : (
+              freeTextAnswers.map((a) => (
+                <div key={a.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs uppercase tracking-[0.2em] text-dim">{a.nickname}</p>
+                    <p className="mt-1 break-words text-paper">{a.text}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {a.graded && (
+                      <span
+                        className={`font-mono text-xs ${a.correct ? "text-aurora" : "text-flare"}`}
+                      >
+                        {a.correct ? `Correct · +${a.pointsAwarded}` : "Incorrect"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => gradeAnswer(a.id, true)}
+                      aria-label="Mark correct — full points"
+                      title="Mark correct — full points"
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-lg font-semibold transition ${
+                        a.graded && a.correct
+                          ? "border-aurora bg-aurora/20 text-aurora"
+                          : "border-void-3 text-dim hover:border-aurora hover:text-aurora"
+                      }`}
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => gradeAnswer(a.id, false)}
+                      aria-label="Mark incorrect — no points"
+                      title="Mark incorrect — no points"
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-lg font-semibold transition ${
+                        a.graded && !a.correct
+                          ? "border-flare bg-flare/20 text-flare"
+                          : "border-void-3 text-dim hover:border-flare hover:text-flare"
+                      }`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </Panel>
+        </section>
+      )}
+
       {game.status === "lobby" && (
         <Panel className="mt-6 p-6 sm:p-8">
           <div className="flex flex-col items-center gap-8 sm:flex-row sm:items-center sm:justify-between">
@@ -291,9 +383,23 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
                     disabled={busy || !isReachable}
                     onClick={() => resetAnswers(i, q.prompt)}
                     title="Wipe every player's answer to this question so it can be answered again"
-                    className="shrink-0 font-mono text-xs text-flare/80 underline decoration-flare/30 underline-offset-4 hover:text-flare disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Reset answers for this question"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-void-3 text-flare/80 transition hover:border-flare hover:text-flare disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Reset answers
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-5 w-5"
+                      aria-hidden="true"
+                    >
+                      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                      <path d="M22 21H7" />
+                      <path d="m5 11 9 9" />
+                    </svg>
                   </button>
                 </div>
               );
@@ -315,15 +421,25 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
             ) : (
               game.players.map((p) => (
                 <div key={p.clientId} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <span className="truncate text-paper">
-                    {p.nickname} {p.connected ? "🟢" : "⚪"}
+                  <span className="flex min-w-0 items-center gap-2 truncate text-paper">
+                    <span
+                      aria-hidden="true"
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: playerColorHex(p.color) }}
+                    />
+                    <span className="truncate">
+                      {p.nickname} {p.connected ? "🟢" : "⚪"}
+                    </span>
                   </span>
                   <button
+                    type="button"
                     disabled={busy}
                     onClick={() => kickPlayer(p.clientId)}
-                    className="shrink-0 font-mono text-xs text-flare/80 underline decoration-flare/30 underline-offset-4 hover:text-flare disabled:opacity-40"
+                    title="Kick from the lobby"
+                    aria-label="Kick from the lobby"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-void-3 text-lg font-semibold text-flare/80 transition hover:border-flare hover:text-flare disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Kick
+                    ✕
                   </button>
                 </div>
               ))

@@ -255,6 +255,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/games/{gameId}/questions/{questionId}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+                questionId: string;
+            };
+            cookie?: never;
+        };
+        /** List every free-text answer submitted so far for one question in this game, for the admin to grade. Always empty for multiple_choice questions, which are scored automatically. */
+        get: operations["listFreeTextAnswers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/games/{gameId}/answers/{answerId}/grade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+                answerId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Manually grade one free-text answer: full points for the question if correct, none otherwise. Can be called again to change a grading mistake — the player's score is adjusted by the difference, not just added to. */
+        post: operations["gradeAnswer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/games/{gameId}/players/{clientId}": {
         parameters: {
             query?: never;
@@ -335,7 +375,7 @@ export interface components {
             message: string;
         };
         /** @enum {string} */
-        QuestionType: "multiple_choice";
+        QuestionType: "multiple_choice" | "free_text";
         /** @enum {string} */
         GameStatus: "lobby" | "in_progress" | "ended";
         Quiz: {
@@ -389,6 +429,7 @@ export interface components {
             text: string;
             isCorrect: boolean;
         };
+        /** @description options is required (2 or more) for multiple_choice and must be omitted (or empty) for free_text — free_text answers are always graded manually by the admin, not against a stored correct answer. */
         CreateQuestionRequest: {
             type: components["schemas"]["QuestionType"];
             prompt: string;
@@ -396,7 +437,7 @@ export interface components {
             timeLimitSeconds: number;
             /** @default 1000 */
             points: number;
-            options: components["schemas"]["CreateQuestionOption"][];
+            options?: components["schemas"]["CreateQuestionOption"][];
         };
         UpdateQuestionRequest: {
             prompt?: string;
@@ -414,6 +455,21 @@ export interface components {
         ResetAnswersRequest: {
             /** @description Must be at or before the game's current question index. */
             questionIndex: number;
+        };
+        FreeTextAnswer: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            clientId: string;
+            nickname: string;
+            text: string;
+            graded: boolean;
+            /** @description Only meaningful once graded is true. */
+            correct?: boolean;
+            pointsAwarded?: number;
+        };
+        GradeAnswerRequest: {
+            correct: boolean;
         };
         CreateGameRequest: {
             /** Format: uuid */
@@ -433,12 +489,18 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /**
+         * @description A small, curated set of cosmos-themed color choices — not a full color picker — so every player's pick reads clearly against the dark theme and stays distinct from the app's own semantic colors.
+         * @enum {string}
+         */
+        PlayerColor: "nebula" | "comet" | "nova" | "quasar" | "solar" | "crimson";
         AdminPlayer: {
             /** Format: uuid */
             clientId: string;
             nickname: string;
             score: number;
             connected: boolean;
+            color: components["schemas"]["PlayerColor"];
         };
         AdminGameDetail: components["schemas"]["AdminGame"] & {
             players: components["schemas"]["AdminPlayer"][];
@@ -446,6 +508,8 @@ export interface components {
         JoinGameRequest: {
             code: string;
             nickname: string;
+            /** @description One of PlayerColor's values, ideally — but deliberately typed as a plain string here (not $ref'd) rather than validated against the enum, so an unrecognized or omitted value falls back to a default instead of failing the whole join. */
+            color?: string;
         };
         JoinGameResponse: {
             /** Format: uuid */
@@ -453,6 +517,7 @@ export interface components {
             code: string;
             status: components["schemas"]["GameStatus"];
             nickname: string;
+            color: components["schemas"]["PlayerColor"];
         };
         PublicGame: {
             code: string;
@@ -466,6 +531,7 @@ export interface components {
             nickname: string;
             score: number;
             rank: number;
+            color: components["schemas"]["PlayerColor"];
         };
         Leaderboard: {
             entries: components["schemas"]["LeaderboardEntry"][];
@@ -1058,6 +1124,63 @@ export interface operations {
                     "application/json": components["schemas"]["Leaderboard"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listFreeTextAnswers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+                questionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Free-text answers, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreeTextAnswer"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    gradeAnswer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+                answerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GradeAnswerRequest"];
+            };
+        };
+        responses: {
+            /** @description Answer graded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreeTextAnswer"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

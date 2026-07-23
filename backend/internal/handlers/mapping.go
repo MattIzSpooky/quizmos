@@ -87,6 +87,7 @@ func gameDetailToAPI(g service.GameDetail, connected map[string]bool) api.AdminG
 			Nickname:  p.Nickname,
 			Score:     int(p.Score),
 			Connected: connected[p.ClientID.String()],
+			Color:     api.PlayerColor(p.Color),
 		}
 	}
 	return api.AdminGameDetail{
@@ -103,10 +104,27 @@ func gameDetailToAPI(g service.GameDetail, connected map[string]bool) api.AdminG
 	}
 }
 
+func freeTextAnswerToAPI(a service.FreeTextAnswer) api.FreeTextAnswer {
+	out := api.FreeTextAnswer{
+		Id:       a.ID,
+		ClientId: a.ClientID,
+		Nickname: a.Nickname,
+		Text:     a.Text,
+		Graded:   a.Graded,
+	}
+	if a.Graded {
+		correct := a.Correct
+		points := a.PointsAwarded
+		out.Correct = &correct
+		out.PointsAwarded = &points
+	}
+	return out
+}
+
 func leaderboardToAPI(entries []service.LeaderboardEntry) api.Leaderboard {
 	out := make([]api.LeaderboardEntry, len(entries))
 	for i, e := range entries {
-		out[i] = api.LeaderboardEntry{ClientId: e.ClientID, Nickname: e.Nickname, Score: e.Score, Rank: e.Rank}
+		out[i] = api.LeaderboardEntry{ClientId: e.ClientID, Nickname: e.Nickname, Score: e.Score, Rank: e.Rank, Color: api.PlayerColor(e.Color)}
 	}
 	return api.Leaderboard{Entries: out}
 }

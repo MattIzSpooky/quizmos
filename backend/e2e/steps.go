@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -48,10 +49,14 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^(?:I create a|a) quiz titled "([^"]*)"$`, aQuizTitled)
 	sc.Step(`^(?:I create an|an) untimed quiz titled "([^"]*)"$`, anUntimedQuizTitled)
 	sc.Step(`^(?:I add a|a) multiple choice question "([^"]*)" with options:$`, aMultipleChoiceQuestionWithOptions)
+	sc.Step(`^(?:I add a|a) free text question "([^"]*)"$`, aFreeTextQuestion)
+	sc.Step(`^I try to add a free text question "([^"]*)" with options:$`, iTryToAddAFreeTextQuestionWithOptions)
 	sc.Step(`^the quiz should have (\d+) questions?$`, theQuizShouldHaveNQuestions)
 
 	sc.Step(`^I create a game for the quiz$`, iCreateAGameForTheQuiz)
 	sc.Step(`^"([^"]*)" joins the game$`, joinsTheGame)
+	sc.Step(`^"([^"]*)" joins the game with color "([^"]*)"$`, joinsTheGameWithColor)
+	sc.Step(`^"([^"]*)" should be shown to the admin with color "([^"]*)"$`, shouldBeShownToTheAdminWithColor)
 	sc.Step(`^"([^"]*)" rejoins the game$`, rejoinsTheGame)
 	sc.Step(`^"([^"]*)" tries to join game code "([^"]*)"$`, triesToJoinGameCode)
 	sc.Step(`^the request should succeed$`, theRequestShouldSucceed)
@@ -74,13 +79,20 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^resetting answers for question (\d+) should fail with status (\d+)$`, resettingAnswersForQuestionNShouldFailWithStatus)
 	sc.Step(`^the admin ends the game$`, theAdminEndsTheGame)
 
-	sc.Step(`^"([^"]*)" should receive a "([^"]*)" message$`, shouldReceiveAMessage)
+	sc.Step(`^"([^"]*)" should receive (?:a|an) "([^"]*)" message$`, shouldReceiveAMessage)
 	sc.Step(`^"([^"]*)" should receive a "question\.started" message with timed (true|false)$`, shouldReceiveQuestionStartedWithTimed)
+	sc.Step(`^"([^"]*)" should receive a "question\.started" message with your answer pending$`, shouldReceiveQuestionStartedWithYourAnswerPending)
+	sc.Step(`^"([^"]*)" should receive a "question\.started" message with your answer graded (correct|incorrect) and (\d+) points$`, shouldReceiveQuestionStartedWithYourAnswerGraded)
 	sc.Step(`^"([^"]*)" answers "([^"]*)"$`, answers)
 	sc.Step(`^"([^"]*)" answers "([^"]*)" again$`, answersAgain)
 	sc.Step(`^"([^"]*)" should receive an "answer\.result" message with correct (true|false) and (\d+) points$`, shouldReceiveAnAnswerResult)
+	sc.Step(`^"([^"]*)" submits the free-text answer "([^"]*)"$`, submitsFreeTextAnswer)
+	sc.Step(`^"([^"]*)" submits an over-length free-text answer$`, submitsOverLengthFreeTextAnswer)
+	sc.Step(`^"([^"]*)" should receive a pending "answer\.result" message$`, shouldReceiveAPendingAnswerResult)
+	sc.Step(`^the admin grades "([^"]*)"'s answer to "([^"]*)" as (correct|incorrect)$`, theAdminGradesAnswerAs)
 
 	sc.Step(`^the leaderboard should show "([^"]*)" with score (\d+)$`, theLeaderboardShouldShow)
+	sc.Step(`^the leaderboard should show "([^"]*)" with color "([^"]*)"$`, theLeaderboardShouldShowWithColor)
 }
 
 // --- auth -------------------------------------------------------------
@@ -165,6 +177,52 @@ func aMultipleChoiceQuestionWithOptions(ctx context.Context, prompt string, tabl
 	return nil
 }
 
+// aFreeTextQuestion creates a free_text question worth 100 points, matching
+// the points used for multiple_choice questions elsewhere in the suite so
+// grading scenarios can assert on the same round numbers.
+func aFreeTextQuestion(ctx context.Context, prompt string) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s/questions", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{
+		"type":             "free_text",
+		"prompt":           prompt,
+		"timeLimitSeconds": 30,
+		"points":           100,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusCreated {
+		return fmt.Errorf("expected 201 creating free text question, got %d: %v", resp.Status, resp.Body)
+	}
+	w.questions[prompt] = questionRecord{id: resp.Body["id"].(string), options: make(map[string]string)}
+	return nil
+}
+
+// iTryToAddAFreeTextQuestionWithOptions exercises the rejection path: a
+// free_text question must not carry options, unlike multiple_choice.
+func iTryToAddAFreeTextQuestionWithOptions(ctx context.Context, prompt string, table *godog.Table) error {
+	w := worldFromContext(ctx)
+	var options []map[string]any
+	for _, row := range table.Rows[1:] { // Rows[0] is the "text | correct" header
+		correct, err := strconv.ParseBool(row.Cells[1].Value)
+		if err != nil {
+			return fmt.Errorf("parsing 'correct' column %q: %w", row.Cells[1].Value, err)
+		}
+		options = append(options, map[string]any{"text": row.Cells[0].Value, "isCorrect": correct})
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions", w.quizID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{
+		"type":             "free_text",
+		"prompt":           prompt,
+		"timeLimitSeconds": 30,
+		"points":           100,
+		"options":          options,
+	})
+	w.lastResponse = resp
+	return err
+}
+
 func theQuizShouldHaveNQuestions(ctx context.Context, want int) error {
 	w := worldFromContext(ctx)
 	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
@@ -238,6 +296,52 @@ func doJoinAs(ctx context.Context, w *World, nickname, code, clientID string) er
 	return nil
 }
 
+// joinsTheGameWithColor covers both a recognized color and an
+// unrecognized one (the latter should fall back to the default rather
+// than fail the join — color is cosmetic, never worth rejecting a
+// request over).
+func joinsTheGameWithColor(ctx context.Context, nickname, color string) error {
+	w := worldFromContext(ctx)
+	clientID := w.newClientID()
+	resp, err := w.publicRequest(ctx, http.MethodPost, "/games/join", clientID, map[string]any{
+		"code":     w.gameCode,
+		"nickname": nickname,
+		"color":    color,
+	})
+	w.lastResponse = resp
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 joining as %q, got %d: %v", nickname, resp.Status, resp.Body)
+	}
+	w.players[nickname] = newPlayer(nickname, clientID)
+	return nil
+}
+
+func shouldBeShownToTheAdminWithColor(ctx context.Context, nickname, wantColor string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	path := fmt.Sprintf("/admin/games/%s", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	for _, raw := range resp.Body["players"].([]any) {
+		player := raw.(map[string]any)
+		if player["clientId"] == p.clientID {
+			if got := player["color"]; got != wantColor {
+				return fmt.Errorf("expected color %q for %q, got %v", wantColor, nickname, got)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no admin roster entry for %q", nickname)
+}
+
 func theRequestShouldSucceed(ctx context.Context) error {
 	status := worldFromContext(ctx).lastResponse.Status
 	if status < 200 || status >= 300 {
@@ -303,6 +407,11 @@ func connectsToTheGameWebsocket(ctx context.Context, nickname string) error {
 	if !ok {
 		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
 	}
+	// A reconnect's catch-up can resend question.started (see hub
+	// sendCatchUp) on top of whatever backlog already exists from this
+	// question actually starting — fast-forward past that backlog so a
+	// later assertion catches the fresh catch-up send, not stale history.
+	p.catchUp(ws.TypeQuestionStarted)
 	return w.connectPlayerSocket(ctx, p)
 }
 
@@ -405,6 +514,15 @@ func reviewingQuestionNShouldFailWithStatus(ctx context.Context, n, want int) er
 }
 
 func reviewQuestionAtIndex(ctx context.Context, w *World, index, wantStatus int) error {
+	// Reviewing the still-current question resumes live play by
+	// redelivering question.started (see backend ReviewQuestion's IsLive
+	// case) — on top of whatever question.started backlog already
+	// exists (the question actually starting, any earlier review-then-
+	// resume). Fast-forward every player past that backlog so a later
+	// assertion catches the fresh resend, not stale history.
+	for _, p := range w.players {
+		p.catchUp(ws.TypeQuestionStarted)
+	}
 	path := fmt.Sprintf("/admin/games/%s/review-question", w.gameID)
 	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{"questionIndex": index})
 	if err != nil {
@@ -487,13 +605,70 @@ func shouldReceiveQuestionStartedWithTimed(ctx context.Context, nickname, wantTi
 	return nil
 }
 
+// shouldReceiveQuestionStartedWithYourAnswerPending asserts that a
+// question.started message carries the recipient's own not-yet-graded
+// answer — the regression check for resuming live play (or reconnecting)
+// after already having answered.
+func shouldReceiveQuestionStartedWithYourAnswerPending(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	env, err := p.waitFor(ctx, ws.TypeQuestionStarted, defaultWaitTimeout)
+	if err != nil {
+		return err
+	}
+	var qs ws.QuestionStarted
+	if err := json.Unmarshal(env.Payload, &qs); err != nil {
+		return err
+	}
+	if qs.YourAnswer == nil {
+		return fmt.Errorf("expected yourAnswer to be present, got nil")
+	}
+	if !qs.YourAnswer.Pending {
+		return fmt.Errorf("expected yourAnswer.pending=true, got false")
+	}
+	return nil
+}
+
+func shouldReceiveQuestionStartedWithYourAnswerGraded(ctx context.Context, nickname, verdict string, wantPoints int) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	wantCorrect := verdict == "correct"
+	env, err := p.waitFor(ctx, ws.TypeQuestionStarted, defaultWaitTimeout)
+	if err != nil {
+		return err
+	}
+	var qs ws.QuestionStarted
+	if err := json.Unmarshal(env.Payload, &qs); err != nil {
+		return err
+	}
+	if qs.YourAnswer == nil {
+		return fmt.Errorf("expected yourAnswer to be present, got nil")
+	}
+	if qs.YourAnswer.Pending {
+		return fmt.Errorf("expected yourAnswer.pending=false, got true")
+	}
+	if qs.YourAnswer.Correct == nil || *qs.YourAnswer.Correct != wantCorrect {
+		return fmt.Errorf("expected yourAnswer.correct=%v, got %v", wantCorrect, qs.YourAnswer.Correct)
+	}
+	if qs.YourAnswer.PointsAwarded == nil || int(*qs.YourAnswer.PointsAwarded) != wantPoints {
+		return fmt.Errorf("expected yourAnswer.pointsAwarded=%d, got %v", wantPoints, qs.YourAnswer.PointsAwarded)
+	}
+	return nil
+}
+
 func answers(ctx context.Context, nickname, optionText string) error {
 	w := worldFromContext(ctx)
 	p, ok := w.players[nickname]
 	if !ok {
 		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
 	}
-	if _, err := p.waitFor(ctx, ws.TypeQuestionStarted, defaultWaitTimeout); err != nil {
+	if err := p.waitForCurrentQuestion(ctx, defaultWaitTimeout); err != nil {
 		return err
 	}
 	return submitAnswer(ctx, p, optionText)
@@ -563,6 +738,112 @@ func shouldReceiveAnAnswerResult(ctx context.Context, nickname, wantCorrectStr s
 	return nil
 }
 
+func submitsFreeTextAnswer(ctx context.Context, nickname, text string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if err := p.waitForCurrentQuestion(ctx, defaultWaitTimeout); err != nil {
+		return err
+	}
+	return submitFreeText(ctx, p, text)
+}
+
+// submitsOverLengthFreeTextAnswer exercises the 500-character limit
+// (see service.MaxFreeTextAnswerLength) with a 501-character answer.
+func submitsOverLengthFreeTextAnswer(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if err := p.waitForCurrentQuestion(ctx, defaultWaitTimeout); err != nil {
+		return err
+	}
+	return submitFreeText(ctx, p, strings.Repeat("a", 501))
+}
+
+func submitFreeText(ctx context.Context, p *player, text string) error {
+	payload, err := json.Marshal(map[string]string{
+		"questionId": p.currentQuestion.QuestionID,
+		"text":       text,
+	})
+	if err != nil {
+		return err
+	}
+	env := wsEnvelope{Type: ws.TypeAnswerSubmit, Payload: payload}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return p.conn.Write(ctx, websocket.MessageText, raw)
+}
+
+func shouldReceiveAPendingAnswerResult(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	env, err := p.waitFor(ctx, ws.TypeAnswerResult, defaultWaitTimeout)
+	if err != nil {
+		return err
+	}
+	var result ws.AnswerResult
+	if err := json.Unmarshal(env.Payload, &result); err != nil {
+		return err
+	}
+	if !result.Pending {
+		return fmt.Errorf("expected pending=true, got false (result: %+v)", result)
+	}
+	return nil
+}
+
+// theAdminGradesAnswerAs looks up the free-text answer nickname submitted
+// to questionPrompt via the admin listing endpoint (the suite never tracks
+// answer IDs directly — they're server-generated) and grades it.
+func theAdminGradesAnswerAs(ctx context.Context, nickname, questionPrompt, verdict string) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[questionPrompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", questionPrompt)
+	}
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+
+	listPath := fmt.Sprintf("/admin/games/%s/questions/%s/answers", w.gameID, qr.id)
+	listResp, err := w.adminRequest(ctx, http.MethodGet, listPath, nil)
+	if err != nil {
+		return err
+	}
+	if listResp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 listing free-text answers, got %d", listResp.Status)
+	}
+	var answerID string
+	for _, row := range listResp.RawList {
+		if row["clientId"] == p.clientID {
+			answerID = row["id"].(string)
+			break
+		}
+	}
+	if answerID == "" {
+		return fmt.Errorf("no free-text answer from %q found for question %q", nickname, questionPrompt)
+	}
+
+	gradePath := fmt.Sprintf("/admin/games/%s/answers/%s/grade", w.gameID, answerID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, gradePath, map[string]any{"correct": verdict == "correct"})
+	if err != nil {
+		return err
+	}
+	if resp.Status != http.StatusOK {
+		return fmt.Errorf("expected 200 grading answer, got %d: %v", resp.Status, resp.Body)
+	}
+	return nil
+}
+
 func theLeaderboardShouldShow(ctx context.Context, nickname string, wantScore int) error {
 	w := worldFromContext(ctx)
 	path := fmt.Sprintf("/admin/games/%s/leaderboard", w.gameID)
@@ -577,6 +858,26 @@ func theLeaderboardShouldShow(ctx context.Context, nickname string, wantScore in
 			got := int(entry["score"].(float64))
 			if got != wantScore {
 				return fmt.Errorf("expected %q to have score %d, got %d", nickname, wantScore, got)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no leaderboard entry for %q", nickname)
+}
+
+func theLeaderboardShouldShowWithColor(ctx context.Context, nickname, wantColor string) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/games/%s/leaderboard", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	entries, _ := resp.Body["entries"].([]any)
+	for _, raw := range entries {
+		entry := raw.(map[string]any)
+		if entry["nickname"] == nickname {
+			if got := entry["color"]; got != wantColor {
+				return fmt.Errorf("expected color %q for %q, got %v", wantColor, nickname, got)
 			}
 			return nil
 		}

@@ -18,9 +18,11 @@ export function meta({}: Route.MetaArgs) {
   return [{ title: "Quizmos — Playing" }];
 }
 
+const MAX_FREE_TEXT_ANSWER_LENGTH = 500;
+
 type PlayState =
   | { phase: "lobby"; playerCount: number }
-  | { phase: "question"; question: QuestionStarted; result: AnswerResult | null }
+  | { phase: "question"; question: QuestionStarted }
   | { phase: "reveal"; ended: QuestionEnded; leaderboard: LeaderboardEntry[] | null }
   | { phase: "review"; review: QuestionReviewed }
   | { phase: "ended"; leaderboard: LeaderboardEntry[] }
@@ -36,20 +38,11 @@ function reducer(state: PlayState, action: ServerMessage): PlayState {
     case "game.started":
       return state;
     case "question.started":
-      return { phase: "question", question: action.payload, result: null };
-    case "answer.result":
-      return state.phase === "question" ? { ...state, result: action.payload } : state;
+      return { phase: "question", question: action.payload };
     case "question.ended":
       return { phase: "reveal", ended: action.payload, leaderboard: null };
     case "question.reviewed":
       return { phase: "review", review: action.payload };
-    case "question.answersReset":
-      // The admin wiped this question's answers so it can be answered
-      // again — clear our own submitted result too (see the onMessage
-      // handler for clearing the locally-selected option).
-      return state.phase === "question" && state.question.questionId === action.payload.questionId
-        ? { ...state, result: null }
-        : state;
     case "leaderboard.updated":
       return state.phase === "reveal" ? { ...state, leaderboard: action.payload.entries } : state;
     case "game.ended":
@@ -63,12 +56,18 @@ export default function Play({ params }: Route.ComponentProps) {
   const code = params.code;
   const navigate = useNavigate();
   const [state, dispatch] = useReducer(reducer, { phase: "lobby", playerCount: 1 });
-  const [answeredOptionId, setAnsweredOptionId] = useState<string | null>(null);
+  const [hasAnswered, setHasAnswered] = useState(false);
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [freeTextValue, setFreeTextValue] = useState("");
+  // answer.result can arrive well after the "question" phase ends — a
+  // free-text grade might land during "reveal" or even later — so it's
+  // tracked here rather than nested in the reducer's per-phase state.
+  const [latestAnswerResult, setLatestAnswerResult] = useState<AnswerResult | null>(null);
   // Options carry no text past question.started, so we keep the last seen
   // question around to render option labels during the reveal phase.
   const [lastQuestion, setLastQuestion] = useState<QuestionStarted | null>(null);
   // onMessage's useCallback deps are intentionally empty (so the socket
-  // never has to reconnect), so it can't close over a fresh `state` — this
+  // never has to reconnect), so it can't close over fresh `state` — this
   // ref mirrors it for the one place that needs to read current phase.
   const stateRef = useRef(state);
   useEffect(() => {
@@ -77,13 +76,42 @@ export default function Play({ params }: Route.ComponentProps) {
 
   const onMessage = useCallback((msg: ServerMessage) => {
     if (msg.type === "question.started") {
-      setAnsweredOptionId(null);
+      // question.started isn't always a fresh question: resuming live
+      // play after a review, or reconnecting mid-question, redelivers it
+      // for a question the recipient may have already answered. The
+      // server folds that into yourAnswer (rather than us guessing from
+      // local state, which a reconnect/remount would lose anyway) — its
+      // absence means genuinely not answered yet.
+      const yours = msg.payload.yourAnswer;
+      if (yours) {
+        setHasAnswered(true);
+        setSelectedOptionId(yours.optionId ?? null);
+        setFreeTextValue(yours.text ?? "");
+        setLatestAnswerResult({
+          questionId: msg.payload.questionId,
+          correct: yours.correct ?? false,
+          pointsAwarded: yours.pointsAwarded ?? 0,
+          totalScore: yours.pointsAwarded ?? 0,
+          pending: yours.pending,
+        });
+      } else {
+        setHasAnswered(false);
+        setSelectedOptionId(null);
+        setFreeTextValue("");
+        setLatestAnswerResult(null);
+      }
       setLastQuestion(msg.payload);
+    }
+    if (msg.type === "answer.result") {
+      setLatestAnswerResult(msg.payload);
     }
     if (msg.type === "question.answersReset") {
       const current = stateRef.current;
       if (current.phase === "question" && current.question.questionId === msg.payload.questionId) {
-        setAnsweredOptionId(null);
+        setHasAnswered(false);
+        setSelectedOptionId(null);
+        setFreeTextValue("");
+        setLatestAnswerResult(null);
       }
     }
     if (msg.type === "player.kicked" || msg.type === "game.ended") {
@@ -95,10 +123,19 @@ export default function Play({ params }: Route.ComponentProps) {
   }, []);
   const { status, send, disconnect } = useGameSocket(code, onMessage);
 
-  function submitAnswer(optionId: string) {
-    if (state.phase !== "question" || answeredOptionId) return;
-    setAnsweredOptionId(optionId);
+  function submitOption(optionId: string) {
+    if (state.phase !== "question" || hasAnswered) return;
+    setHasAnswered(true);
+    setSelectedOptionId(optionId);
     send({ type: "answer.submit", payload: { questionId: state.question.questionId, optionId } });
+  }
+
+  function submitFreeText() {
+    if (state.phase !== "question" || hasAnswered) return;
+    const trimmed = freeTextValue.trim();
+    if (!trimmed) return;
+    setHasAnswered(true);
+    send({ type: "answer.submit", payload: { questionId: state.question.questionId, text: trimmed } });
   }
 
   const statusColor =
@@ -139,37 +176,64 @@ export default function Play({ params }: Route.ComponentProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {state.question.options.map((opt) => {
-                const selected = answeredOptionId === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => submitAnswer(opt.id)}
-                    disabled={!!answeredOptionId}
-                    className={`min-h-16 rounded-xl border px-4 py-3 text-left font-medium transition disabled:cursor-not-allowed ${
-                      selected
-                        ? "border-aurora bg-aurora/10 text-paper"
-                        : "border-void-3 bg-void-2/80 text-paper hover:border-starlight-dim disabled:opacity-50"
-                    }`}
-                  >
-                    {opt.text}
-                  </button>
-                );
-              })}
-            </div>
+            {state.question.type === "free_text" ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  value={freeTextValue}
+                  onChange={(e) => setFreeTextValue(e.target.value.slice(0, MAX_FREE_TEXT_ANSWER_LENGTH))}
+                  disabled={hasAnswered}
+                  maxLength={MAX_FREE_TEXT_ANSWER_LENGTH}
+                  rows={4}
+                  placeholder="Type your answer…"
+                  className="w-full resize-none rounded-xl border border-void-3 bg-void-2/80 px-4 py-3 text-paper placeholder-dim/60 outline-none transition focus:border-aurora disabled:opacity-50"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-dim">
+                    {freeTextValue.length}/{MAX_FREE_TEXT_ANSWER_LENGTH}
+                  </span>
+                  <Button onClick={submitFreeText} disabled={hasAnswered || !freeTextValue.trim()}>
+                    Submit answer
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {state.question.options.map((opt) => {
+                  const selected = selectedOptionId === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => submitOption(opt.id)}
+                      disabled={hasAnswered}
+                      className={`min-h-16 rounded-xl border px-4 py-3 text-left font-medium transition disabled:cursor-not-allowed ${
+                        selected
+                          ? "border-aurora bg-aurora/10 text-paper"
+                          : "border-void-3 bg-void-2/80 text-paper hover:border-starlight-dim disabled:opacity-50"
+                      }`}
+                    >
+                      {opt.text}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-            {state.result && (
+            {latestAnswerResult?.questionId === state.question.questionId && !latestAnswerResult.pending && (
               <p
                 className={`text-center font-display text-lg font-semibold ${
-                  state.result.correct ? "text-aurora" : "text-flare"
+                  latestAnswerResult.correct ? "text-aurora" : "text-flare"
                 }`}
                 role="status"
               >
-                {state.result.correct ? `Correct — +${state.result.pointsAwarded}` : "Not quite"}
+                {latestAnswerResult.correct ? `Correct — +${latestAnswerResult.pointsAwarded}` : "Not quite"}
               </p>
             )}
-            {answeredOptionId && !state.result && (
+            {latestAnswerResult?.questionId === state.question.questionId && latestAnswerResult.pending && (
+              <p className="text-center font-mono text-xs text-dim" role="status">
+                Submitted — awaiting the host's grade…
+              </p>
+            )}
+            {hasAnswered && latestAnswerResult?.questionId !== state.question.questionId && (
               <p className="text-center font-mono text-xs text-dim" role="status">
                 Answer locked in…
               </p>
@@ -182,27 +246,49 @@ export default function Play({ params }: Route.ComponentProps) {
             <h1 className="text-center font-display text-xl font-semibold text-paper">
               {lastQuestion.prompt}
             </h1>
-            <ul className="flex flex-col gap-2">
-              {lastQuestion.options.map((opt) => {
-                const isCorrect = opt.id === state.ended.correctOptionId;
-                const count =
-                  state.ended.answerCounts.find((c) => c.optionId === opt.id)?.count ?? 0;
-                return (
-                  <li
-                    key={opt.id}
-                    className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
-                      isCorrect ? "border-starlight bg-starlight/10" : "border-void-3 bg-void-2/60"
+            {lastQuestion.type === "free_text" ? (
+              <div className="rounded-2xl border border-void-3 bg-void-2/60 p-5">
+                {latestAnswerResult?.questionId === lastQuestion.questionId &&
+                !latestAnswerResult.pending ? (
+                  <p
+                    className={`text-center font-display text-lg font-semibold ${
+                      latestAnswerResult.correct ? "text-aurora" : "text-flare"
                     }`}
                   >
-                    <span className={isCorrect ? "text-starlight" : "text-paper"}>
-                      {isCorrect ? "★ " : ""}
-                      {opt.text}
-                    </span>
-                    <span className="font-mono text-xs text-dim">{count}</span>
-                  </li>
-                );
-              })}
-            </ul>
+                    {latestAnswerResult.correct
+                      ? `Correct — +${latestAnswerResult.pointsAwarded}`
+                      : "Not quite"}
+                  </p>
+                ) : (
+                  <p className="text-center text-sm text-dim">
+                    The host is reviewing free-text answers by hand — your result will appear once
+                    they've graded yours.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {lastQuestion.options.map((opt) => {
+                  const isCorrect = opt.id === state.ended.correctOptionId;
+                  const count =
+                    state.ended.answerCounts.find((c) => c.optionId === opt.id)?.count ?? 0;
+                  return (
+                    <li
+                      key={opt.id}
+                      className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+                        isCorrect ? "border-starlight bg-starlight/10" : "border-void-3 bg-void-2/60"
+                      }`}
+                    >
+                      <span className={isCorrect ? "text-starlight" : "text-paper"}>
+                        {isCorrect ? "★ " : ""}
+                        {opt.text}
+                      </span>
+                      <span className="font-mono text-xs text-dim">{count}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             <div>
               <p className="mb-3 font-mono text-xs uppercase tracking-[0.2em] text-dim">
                 Standings
@@ -238,27 +324,29 @@ export default function Play({ params }: Route.ComponentProps) {
               <h1 className="text-center font-display text-xl font-semibold text-paper">
                 {state.review.prompt}
               </h1>
-              <ul className="mt-4 flex flex-col gap-2">
-                {state.review.options.map((opt) => {
-                  const isCorrect = opt.id === state.review.correctOptionId;
-                  const count =
-                    state.review.answerCounts.find((c) => c.optionId === opt.id)?.count ?? 0;
-                  return (
-                    <li
-                      key={opt.id}
-                      className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
-                        isCorrect ? "border-starlight bg-starlight/10" : "border-void-3 bg-void-2/60"
-                      }`}
-                    >
-                      <span className={isCorrect ? "text-starlight" : "text-paper"}>
-                        {isCorrect ? "★ " : ""}
-                        {opt.text}
-                      </span>
-                      <span className="font-mono text-xs text-dim">{count}</span>
-                    </li>
-                  );
-                })}
-              </ul>
+              {state.review.options.length > 0 && (
+                <ul className="mt-4 flex flex-col gap-2">
+                  {state.review.options.map((opt) => {
+                    const isCorrect = opt.id === state.review.correctOptionId;
+                    const count =
+                      state.review.answerCounts.find((c) => c.optionId === opt.id)?.count ?? 0;
+                    return (
+                      <li
+                        key={opt.id}
+                        className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+                          isCorrect ? "border-starlight bg-starlight/10" : "border-void-3 bg-void-2/60"
+                        }`}
+                      >
+                        <span className={isCorrect ? "text-starlight" : "text-paper"}>
+                          {isCorrect ? "★ " : ""}
+                          {opt.text}
+                        </span>
+                        <span className="font-mono text-xs text-dim">{count}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
           </div>
         )}

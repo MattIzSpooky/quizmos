@@ -65,6 +65,27 @@ func (p *player) recordMessage(env wsEnvelope) {
 	}
 }
 
+// catchUp marks every occurrence of msgType received so far as consumed,
+// without returning any of them, so a later waitFor(msgType) only matches
+// occurrences that arrive after this call. Use it right before triggering
+// an action expected to (re)send a message of a type the player has
+// already received unconsumed backlog of — e.g. resuming live play
+// redelivers question.started, but so did the question actually
+// starting and any earlier review; without fast-forwarding past that
+// backlog, waitFor would return a stale occurrence instead of the fresh
+// one the action just caused.
+func (p *player) catchUp(msgType string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count := 0
+	for _, m := range p.messages {
+		if m.Type == msgType {
+			count++
+		}
+	}
+	p.consumed[msgType] = count
+}
+
 // waitFor blocks until the next not-yet-consumed occurrence of msgType
 // arrives (i.e. repeated calls advance through the log in order, rather
 // than all matching the first occurrence ever seen) — important once a
@@ -94,6 +115,35 @@ func (p *player) waitFor(ctx context.Context, msgType string, timeout time.Durat
 		select {
 		case <-ctx.Done():
 			return wsEnvelope{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// waitForCurrentQuestion blocks until this player's read loop has recorded
+// at least one question.started message (populating currentQuestion), but
+// — unlike waitFor — doesn't consume a tracked "occurrence" of the
+// message type. Steps that submit an answer only need currentQuestion to
+// be populated to resolve an option or grab the live questionId; they
+// don't care which question.started message that was, and consuming one
+// via waitFor would throw off a later step's count of how many
+// question.started messages have actually been asserted on for this
+// player (e.g. after resuming live play redelivers one).
+func (p *player) waitForCurrentQuestion(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		p.mu.Lock()
+		ready := p.currentQuestion != nil
+		p.mu.Unlock()
+		if ready {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for a question.started message for player %q", p.nickname)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

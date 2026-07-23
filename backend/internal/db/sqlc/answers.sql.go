@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countAnswersByOption = `-- name: CountAnswersByOption :many
@@ -19,8 +20,8 @@ GROUP BY selected_option_id
 `
 
 type CountAnswersByOptionRow struct {
-	SelectedOptionID uuid.UUID `json:"selected_option_id"`
-	AnswerCount      int64     `json:"answer_count"`
+	SelectedOptionID pgtype.UUID `json:"selected_option_id"`
+	AnswerCount      int64       `json:"answer_count"`
 }
 
 func (q *Queries) CountAnswersByOption(ctx context.Context, questionID uuid.UUID) ([]CountAnswersByOptionRow, error) {
@@ -44,18 +45,19 @@ func (q *Queries) CountAnswersByOption(ctx context.Context, questionID uuid.UUID
 }
 
 const createAnswer = `-- name: CreateAnswer :one
-INSERT INTO answers (game_id, question_id, player_id, selected_option_id, is_correct, points_awarded)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at
+INSERT INTO answers (game_id, question_id, player_id, selected_option_id, answer_text, is_correct, points_awarded)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at, answer_text
 `
 
 type CreateAnswerParams struct {
-	GameID           uuid.UUID `json:"game_id"`
-	QuestionID       uuid.UUID `json:"question_id"`
-	PlayerID         uuid.UUID `json:"player_id"`
-	SelectedOptionID uuid.UUID `json:"selected_option_id"`
-	IsCorrect        bool      `json:"is_correct"`
-	PointsAwarded    int32     `json:"points_awarded"`
+	GameID           uuid.UUID   `json:"game_id"`
+	QuestionID       uuid.UUID   `json:"question_id"`
+	PlayerID         uuid.UUID   `json:"player_id"`
+	SelectedOptionID pgtype.UUID `json:"selected_option_id"`
+	AnswerText       pgtype.Text `json:"answer_text"`
+	IsCorrect        pgtype.Bool `json:"is_correct"`
+	PointsAwarded    int32       `json:"points_awarded"`
 }
 
 func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (Answer, error) {
@@ -64,6 +66,7 @@ func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (Ans
 		arg.QuestionID,
 		arg.PlayerID,
 		arg.SelectedOptionID,
+		arg.AnswerText,
 		arg.IsCorrect,
 		arg.PointsAwarded,
 	)
@@ -77,6 +80,7 @@ func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (Ans
 		&i.IsCorrect,
 		&i.PointsAwarded,
 		&i.AnsweredAt,
+		&i.AnswerText,
 	)
 	return i, err
 }
@@ -96,7 +100,7 @@ func (q *Queries) DeleteAnswersForQuestion(ctx context.Context, arg DeleteAnswer
 }
 
 const getAnswer = `-- name: GetAnswer :one
-SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at FROM answers WHERE question_id = $1 AND player_id = $2
+SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at, answer_text FROM answers WHERE question_id = $1 AND player_id = $2
 `
 
 type GetAnswerParams struct {
@@ -116,12 +120,34 @@ func (q *Queries) GetAnswer(ctx context.Context, arg GetAnswerParams) (Answer, e
 		&i.IsCorrect,
 		&i.PointsAwarded,
 		&i.AnsweredAt,
+		&i.AnswerText,
+	)
+	return i, err
+}
+
+const getAnswerByID = `-- name: GetAnswerByID :one
+SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at, answer_text FROM answers WHERE id = $1
+`
+
+func (q *Queries) GetAnswerByID(ctx context.Context, id uuid.UUID) (Answer, error) {
+	row := q.db.QueryRow(ctx, getAnswerByID, id)
+	var i Answer
+	err := row.Scan(
+		&i.ID,
+		&i.GameID,
+		&i.QuestionID,
+		&i.PlayerID,
+		&i.SelectedOptionID,
+		&i.IsCorrect,
+		&i.PointsAwarded,
+		&i.AnsweredAt,
+		&i.AnswerText,
 	)
 	return i, err
 }
 
 const getAnswersForQuestion = `-- name: GetAnswersForQuestion :many
-SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at FROM answers WHERE game_id = $1 AND question_id = $2
+SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at, answer_text FROM answers WHERE game_id = $1 AND question_id = $2
 `
 
 type GetAnswersForQuestionParams struct {
@@ -147,6 +173,96 @@ func (q *Queries) GetAnswersForQuestion(ctx context.Context, arg GetAnswersForQu
 			&i.IsCorrect,
 			&i.PointsAwarded,
 			&i.AnsweredAt,
+			&i.AnswerText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const gradeAnswer = `-- name: GradeAnswer :one
+UPDATE answers
+SET is_correct = $2, points_awarded = $3
+WHERE id = $1
+RETURNING id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at, answer_text
+`
+
+type GradeAnswerParams struct {
+	ID            uuid.UUID   `json:"id"`
+	IsCorrect     pgtype.Bool `json:"is_correct"`
+	PointsAwarded int32       `json:"points_awarded"`
+}
+
+func (q *Queries) GradeAnswer(ctx context.Context, arg GradeAnswerParams) (Answer, error) {
+	row := q.db.QueryRow(ctx, gradeAnswer, arg.ID, arg.IsCorrect, arg.PointsAwarded)
+	var i Answer
+	err := row.Scan(
+		&i.ID,
+		&i.GameID,
+		&i.QuestionID,
+		&i.PlayerID,
+		&i.SelectedOptionID,
+		&i.IsCorrect,
+		&i.PointsAwarded,
+		&i.AnsweredAt,
+		&i.AnswerText,
+	)
+	return i, err
+}
+
+const listFreeTextAnswersForQuestion = `-- name: ListFreeTextAnswersForQuestion :many
+SELECT a.id, a.game_id, a.question_id, a.player_id, a.selected_option_id, a.is_correct, a.points_awarded, a.answered_at, a.answer_text, p.nickname, p.client_id
+FROM answers a
+JOIN players p ON p.id = a.player_id
+WHERE a.game_id = $1 AND a.question_id = $2
+ORDER BY a.answered_at ASC
+`
+
+type ListFreeTextAnswersForQuestionParams struct {
+	GameID     uuid.UUID `json:"game_id"`
+	QuestionID uuid.UUID `json:"question_id"`
+}
+
+type ListFreeTextAnswersForQuestionRow struct {
+	ID               uuid.UUID          `json:"id"`
+	GameID           uuid.UUID          `json:"game_id"`
+	QuestionID       uuid.UUID          `json:"question_id"`
+	PlayerID         uuid.UUID          `json:"player_id"`
+	SelectedOptionID pgtype.UUID        `json:"selected_option_id"`
+	IsCorrect        pgtype.Bool        `json:"is_correct"`
+	PointsAwarded    int32              `json:"points_awarded"`
+	AnsweredAt       pgtype.Timestamptz `json:"answered_at"`
+	AnswerText       pgtype.Text        `json:"answer_text"`
+	Nickname         string             `json:"nickname"`
+	ClientID         uuid.UUID          `json:"client_id"`
+}
+
+func (q *Queries) ListFreeTextAnswersForQuestion(ctx context.Context, arg ListFreeTextAnswersForQuestionParams) ([]ListFreeTextAnswersForQuestionRow, error) {
+	rows, err := q.db.Query(ctx, listFreeTextAnswersForQuestion, arg.GameID, arg.QuestionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFreeTextAnswersForQuestionRow
+	for rows.Next() {
+		var i ListFreeTextAnswersForQuestionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.GameID,
+			&i.QuestionID,
+			&i.PlayerID,
+			&i.SelectedOptionID,
+			&i.IsCorrect,
+			&i.PointsAwarded,
+			&i.AnsweredAt,
+			&i.AnswerText,
+			&i.Nickname,
+			&i.ClientID,
 		); err != nil {
 			return nil, err
 		}

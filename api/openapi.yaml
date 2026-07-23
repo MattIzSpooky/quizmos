@@ -505,6 +505,79 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /admin/games/{gameId}/questions/{questionId}/answers:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+      - name: questionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listFreeTextAnswers
+      tags: [games]
+      summary: >
+        List every free-text answer submitted so far for one question in
+        this game, for the admin to grade. Always empty for
+        multiple_choice questions, which are scored automatically.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Free-text answers, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FreeTextAnswer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/games/{gameId}/answers/{answerId}/grade:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+      - name: answerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: gradeAnswer
+      tags: [games]
+      summary: >
+        Manually grade one free-text answer: full points for the question
+        if correct, none otherwise. Can be called again to change a
+        grading mistake — the player's score is adjusted by the
+        difference, not just added to.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GradeAnswerRequest"
+      responses:
+        "200":
+          description: Answer graded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreeTextAnswer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/games/{gameId}/players/{clientId}:
     parameters:
       - $ref: "#/components/parameters/GameId"
@@ -697,7 +770,7 @@ components:
 
     QuestionType:
       type: string
-      enum: [multiple_choice]
+      enum: [multiple_choice, free_text]
 
     GameStatus:
       type: string
@@ -820,7 +893,11 @@ components:
 
     CreateQuestionRequest:
       type: object
-      required: [type, prompt, options]
+      required: [type, prompt]
+      description: >
+        options is required (2 or more) for multiple_choice and must be
+        omitted (or empty) for free_text — free_text answers are always
+        graded manually by the admin, not against a stored correct answer.
       properties:
         type:
           $ref: "#/components/schemas/QuestionType"
@@ -835,7 +912,6 @@ components:
           default: 1000
         options:
           type: array
-          minItems: 2
           items:
             $ref: "#/components/schemas/CreateQuestionOption"
 
@@ -851,7 +927,6 @@ components:
           type: integer
         options:
           type: array
-          minItems: 2
           items:
             $ref: "#/components/schemas/CreateQuestionOption"
 
@@ -882,6 +957,35 @@ components:
           type: integer
           minimum: 0
           description: Must be at or before the game's current question index.
+
+    FreeTextAnswer:
+      type: object
+      required: [id, clientId, nickname, text, graded]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          format: uuid
+        nickname:
+          type: string
+        text:
+          type: string
+        graded:
+          type: boolean
+        correct:
+          type: boolean
+          description: Only meaningful once graded is true.
+        pointsAwarded:
+          type: integer
+
+    GradeAnswerRequest:
+      type: object
+      required: [correct]
+      properties:
+        correct:
+          type: boolean
 
     CreateGameRequest:
       type: object
@@ -918,9 +1022,17 @@ components:
           type: string
           format: date-time
 
+    PlayerColor:
+      type: string
+      description: >
+        A small, curated set of cosmos-themed color choices — not a full
+        color picker — so every player's pick reads clearly against the
+        dark theme and stays distinct from the app's own semantic colors.
+      enum: [nebula, comet, nova, quasar, solar, crimson]
+
     AdminPlayer:
       type: object
-      required: [clientId, nickname, score, connected]
+      required: [clientId, nickname, score, connected, color]
       properties:
         clientId:
           type: string
@@ -931,6 +1043,8 @@ components:
           type: integer
         connected:
           type: boolean
+        color:
+          $ref: "#/components/schemas/PlayerColor"
 
     AdminGameDetail:
       allOf:
@@ -953,10 +1067,17 @@ components:
           type: string
           minLength: 1
           maxLength: 32
+        color:
+          type: string
+          description: >
+            One of PlayerColor's values, ideally — but deliberately typed
+            as a plain string here (not $ref'd) rather than validated
+            against the enum, so an unrecognized or omitted value falls
+            back to a default instead of failing the whole join.
 
     JoinGameResponse:
       type: object
-      required: [gameId, code, status, nickname]
+      required: [gameId, code, status, nickname, color]
       properties:
         gameId:
           type: string
@@ -967,6 +1088,8 @@ components:
           $ref: "#/components/schemas/GameStatus"
         nickname:
           type: string
+        color:
+          $ref: "#/components/schemas/PlayerColor"
 
     PublicGame:
       type: object
@@ -983,7 +1106,7 @@ components:
 
     LeaderboardEntry:
       type: object
-      required: [clientId, nickname, score, rank]
+      required: [clientId, nickname, score, rank, color]
       properties:
         clientId:
           type: string
@@ -994,6 +1117,8 @@ components:
           type: integer
         rank:
           type: integer
+        color:
+          $ref: "#/components/schemas/PlayerColor"
 
     Leaderboard:
       type: object

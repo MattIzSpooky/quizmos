@@ -9,6 +9,15 @@ import (
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 )
 
+// Question type discriminators (questions.type). multiple_choice is scored
+// automatically against a stored correct option; free_text has no correct
+// answer on file at all — the admin grades each submission by hand (see
+// Service.GradeAnswer).
+const (
+	QuestionTypeMultipleChoice = "multiple_choice"
+	QuestionTypeFreeText       = "free_text"
+)
+
 type QuestionOptionInput struct {
 	Text      string
 	IsCorrect bool
@@ -19,12 +28,32 @@ type QuestionWithOptions struct {
 	Options []db.QuestionOption
 }
 
+// validateOptionsForType enforces that multiple_choice questions have 2+
+// options and free_text questions have none — free_text answers are
+// always graded manually, so a stored "correct" option would be
+// meaningless.
+func validateOptionsForType(questionType string, options []QuestionOptionInput) error {
+	switch questionType {
+	case QuestionTypeMultipleChoice:
+		if len(options) < 2 {
+			return ErrValidation
+		}
+	case QuestionTypeFreeText:
+		if len(options) != 0 {
+			return ErrValidation
+		}
+	default:
+		return ErrValidation
+	}
+	return nil
+}
+
 func (s *Service) CreateQuestion(ctx context.Context, quizID uuid.UUID, questionType, prompt string, timeLimitSeconds, points int, options []QuestionOptionInput) (QuestionWithOptions, error) {
 	if err := s.requireQuiz(ctx, quizID); err != nil {
 		return QuestionWithOptions{}, err
 	}
-	if len(options) < 2 {
-		return QuestionWithOptions{}, ErrValidation
+	if err := validateOptionsForType(questionType, options); err != nil {
+		return QuestionWithOptions{}, err
 	}
 
 	var result QuestionWithOptions
@@ -131,8 +160,8 @@ func (s *Service) UpdateQuestion(ctx context.Context, quizID, questionID uuid.UU
 			return err
 		}
 		if options != nil {
-			if len(options) < 2 {
-				return ErrValidation
+			if err := validateOptionsForType(q.Type, options); err != nil {
+				return err
 			}
 			if err := tx.q.DeleteOptionsByQuestion(ctx, q.ID); err != nil {
 				return err

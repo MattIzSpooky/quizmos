@@ -9,7 +9,11 @@ import (
 )
 
 func (h *Handlers) JoinGame(ctx context.Context, req api.JoinGameRequestObject) (api.JoinGameResponseObject, error) {
-	result, err := h.svc.JoinGame(ctx, req.Body.Code, req.Params.XClientId, req.Body.Nickname)
+	var color string
+	if req.Body.Color != nil {
+		color = string(*req.Body.Color)
+	}
+	result, err := h.svc.JoinGame(ctx, req.Body.Code, req.Params.XClientId, req.Body.Nickname, color)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrNotFound):
@@ -24,6 +28,7 @@ func (h *Handlers) JoinGame(ctx context.Context, req api.JoinGameRequestObject) 
 		Code:     result.Game.Code,
 		Status:   api.GameStatus(result.Game.Status),
 		Nickname: result.Player.Nickname,
+		Color:    api.PlayerColor(result.Player.Color),
 	}, nil
 }
 

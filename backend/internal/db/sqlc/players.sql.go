@@ -43,7 +43,7 @@ func (q *Queries) DeletePlayer(ctx context.Context, arg DeletePlayerParams) (int
 }
 
 const getPlayer = `-- name: GetPlayer :one
-SELECT id, game_id, client_id, nickname, score, joined_at FROM players WHERE game_id = $1 AND client_id = $2
+SELECT id, game_id, client_id, nickname, score, joined_at, color FROM players WHERE game_id = $1 AND client_id = $2
 `
 
 type GetPlayerParams struct {
@@ -61,12 +61,32 @@ func (q *Queries) GetPlayer(ctx context.Context, arg GetPlayerParams) (Player, e
 		&i.Nickname,
 		&i.Score,
 		&i.JoinedAt,
+		&i.Color,
+	)
+	return i, err
+}
+
+const getPlayerByID = `-- name: GetPlayerByID :one
+SELECT id, game_id, client_id, nickname, score, joined_at, color FROM players WHERE id = $1
+`
+
+func (q *Queries) GetPlayerByID(ctx context.Context, id uuid.UUID) (Player, error) {
+	row := q.db.QueryRow(ctx, getPlayerByID, id)
+	var i Player
+	err := row.Scan(
+		&i.ID,
+		&i.GameID,
+		&i.ClientID,
+		&i.Nickname,
+		&i.Score,
+		&i.JoinedAt,
+		&i.Color,
 	)
 	return i, err
 }
 
 const leaderboardByGame = `-- name: LeaderboardByGame :many
-SELECT id, client_id, nickname, score,
+SELECT id, client_id, nickname, score, color,
        RANK() OVER (ORDER BY score DESC) AS rank
 FROM players
 WHERE game_id = $1
@@ -78,6 +98,7 @@ type LeaderboardByGameRow struct {
 	ClientID uuid.UUID `json:"client_id"`
 	Nickname string    `json:"nickname"`
 	Score    int32     `json:"score"`
+	Color    string    `json:"color"`
 	Rank     int64     `json:"rank"`
 }
 
@@ -95,6 +116,7 @@ func (q *Queries) LeaderboardByGame(ctx context.Context, gameID uuid.UUID) ([]Le
 			&i.ClientID,
 			&i.Nickname,
 			&i.Score,
+			&i.Color,
 			&i.Rank,
 		); err != nil {
 			return nil, err
@@ -108,7 +130,7 @@ func (q *Queries) LeaderboardByGame(ctx context.Context, gameID uuid.UUID) ([]Le
 }
 
 const listPlayersByGame = `-- name: ListPlayersByGame :many
-SELECT id, game_id, client_id, nickname, score, joined_at FROM players WHERE game_id = $1 ORDER BY joined_at ASC
+SELECT id, game_id, client_id, nickname, score, joined_at, color FROM players WHERE game_id = $1 ORDER BY joined_at ASC
 `
 
 func (q *Queries) ListPlayersByGame(ctx context.Context, gameID uuid.UUID) ([]Player, error) {
@@ -127,6 +149,7 @@ func (q *Queries) ListPlayersByGame(ctx context.Context, gameID uuid.UUID) ([]Pl
 			&i.Nickname,
 			&i.Score,
 			&i.JoinedAt,
+			&i.Color,
 		); err != nil {
 			return nil, err
 		}
@@ -139,20 +162,26 @@ func (q *Queries) ListPlayersByGame(ctx context.Context, gameID uuid.UUID) ([]Pl
 }
 
 const upsertPlayer = `-- name: UpsertPlayer :one
-INSERT INTO players (game_id, client_id, nickname)
-VALUES ($1, $2, $3)
-ON CONFLICT (game_id, client_id) DO UPDATE SET nickname = EXCLUDED.nickname
-RETURNING id, game_id, client_id, nickname, score, joined_at
+INSERT INTO players (game_id, client_id, nickname, color)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (game_id, client_id) DO UPDATE SET nickname = EXCLUDED.nickname, color = EXCLUDED.color
+RETURNING id, game_id, client_id, nickname, score, joined_at, color
 `
 
 type UpsertPlayerParams struct {
 	GameID   uuid.UUID `json:"game_id"`
 	ClientID uuid.UUID `json:"client_id"`
 	Nickname string    `json:"nickname"`
+	Color    string    `json:"color"`
 }
 
 func (q *Queries) UpsertPlayer(ctx context.Context, arg UpsertPlayerParams) (Player, error) {
-	row := q.db.QueryRow(ctx, upsertPlayer, arg.GameID, arg.ClientID, arg.Nickname)
+	row := q.db.QueryRow(ctx, upsertPlayer,
+		arg.GameID,
+		arg.ClientID,
+		arg.Nickname,
+		arg.Color,
+	)
 	var i Player
 	err := row.Scan(
 		&i.ID,
@@ -161,6 +190,7 @@ func (q *Queries) UpsertPlayer(ctx context.Context, arg UpsertPlayerParams) (Pla
 		&i.Nickname,
 		&i.Score,
 		&i.JoinedAt,
+		&i.Color,
 	)
 	return i, err
 }

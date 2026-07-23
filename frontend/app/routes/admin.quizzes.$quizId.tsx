@@ -8,11 +8,14 @@ import { AdminHeader } from "../components/AdminHeader";
 import { Button, Field, Panel, StarToggle, Toggle } from "../components/ui";
 
 type QuizDetail = components["schemas"]["QuizDetail"];
+type QuestionType = components["schemas"]["QuestionType"];
 
 const EMPTY_OPTIONS = [
   { text: "", isCorrect: true },
   { text: "", isCorrect: false },
 ];
+
+const MAX_FREE_TEXT_ANSWER_LENGTH = 500;
 
 export function meta({}: Route.MetaArgs) {
   return [{ title: "Quizmos Admin — Edit quiz" }];
@@ -23,6 +26,7 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
   const navigate = useNavigate();
   const quizId = params.quizId;
   const [quiz, setQuiz] = useState<QuizDetail | null>(null);
+  const [questionType, setQuestionType] = useState<QuestionType>("multiple_choice");
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState(EMPTY_OPTIONS);
 
@@ -49,10 +53,17 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
 
   async function addQuestion(e: React.FormEvent) {
     e.preventDefault();
-    if (!prompt.trim() || options.some((o) => !o.text.trim())) return;
+    if (!prompt.trim()) return;
+    if (questionType === "multiple_choice" && options.some((o) => !o.text.trim())) return;
     await adminApi.POST("/admin/quizzes/{quizId}/questions", {
       params: { path: { quizId } },
-      body: { type: "multiple_choice", prompt: prompt.trim(), timeLimitSeconds: 30, points: 1000, options },
+      body: {
+        type: questionType,
+        prompt: prompt.trim(),
+        timeLimitSeconds: 30,
+        points: 1000,
+        options: questionType === "multiple_choice" ? options : [],
+      },
     });
     setPrompt("");
     setOptions(EMPTY_OPTIONS);
@@ -116,17 +127,23 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
                     Delete
                   </button>
                 </div>
-                <ul className="mt-2 flex flex-col gap-1">
-                  {q.options.map((o) => (
-                    <li
-                      key={o.id}
-                      className={`flex items-center gap-2 text-sm ${o.isCorrect ? "text-starlight" : "text-dim"}`}
-                    >
-                      <span aria-hidden="true">{o.isCorrect ? "★" : "☆"}</span>
-                      {o.text}
-                    </li>
-                  ))}
-                </ul>
+                {q.type === "free_text" ? (
+                  <p className="mt-2 font-mono text-xs uppercase tracking-[0.2em] text-dim">
+                    Free text — graded manually
+                  </p>
+                ) : (
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {q.options.map((o) => (
+                      <li
+                        key={o.id}
+                        className={`flex items-center gap-2 text-sm ${o.isCorrect ? "text-starlight" : "text-dim"}`}
+                      >
+                        <span aria-hidden="true">{o.isCorrect ? "★" : "☆"}</span>
+                        {o.text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </Panel>
             </li>
           ))}
@@ -139,32 +156,67 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
         </h2>
         <Panel className="p-5">
           <form onSubmit={addQuestion} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+                Question type
+              </span>
+              <div className="flex gap-2">
+                {(
+                  [
+                    { value: "multiple_choice", label: "Multiple choice" },
+                    { value: "free_text", label: "Free text" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setQuestionType(opt.value)}
+                    className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                      questionType === opt.value
+                        ? "border-aurora bg-aurora/10 text-paper"
+                        : "border-void-3 bg-void-2/60 text-dim hover:border-starlight-dim"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <Field
               label="Prompt"
               placeholder="What's the question?"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
-                Options — mark the correct one
-              </span>
-              {options.map((opt, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <StarToggle checked={opt.isCorrect} onChange={() => setCorrect(i)} label={`Option ${i + 1} is correct`} />
-                  <input
-                    className="flex-1 rounded-lg border border-void-3 bg-void px-4 py-2.5 text-paper placeholder-dim/60 outline-none transition focus:border-aurora"
-                    placeholder={`Option ${i + 1}`}
-                    value={opt.text}
-                    onChange={(e) => updateOptionText(i, e.target.value)}
-                  />
-                </div>
-              ))}
-            </div>
+            {questionType === "multiple_choice" ? (
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-dim">
+                  Options — mark the correct one
+                </span>
+                {options.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <StarToggle checked={opt.isCorrect} onChange={() => setCorrect(i)} label={`Option ${i + 1} is correct`} />
+                    <input
+                      className="flex-1 rounded-lg border border-void-3 bg-void px-4 py-2.5 text-paper placeholder-dim/60 outline-none transition focus:border-aurora"
+                      placeholder={`Option ${i + 1}`}
+                      value={opt.text}
+                      onChange={(e) => updateOptionText(i, e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-dim">
+                Players get a text field (up to {MAX_FREE_TEXT_ANSWER_LENGTH} characters) instead of
+                options. You'll grade each answer yourself once it's live.
+              </p>
+            )}
             <div className="flex flex-wrap gap-3">
-              <Button type="button" variant="ghost" onClick={addOption}>
-                + Add option
-              </Button>
+              {questionType === "multiple_choice" && (
+                <Button type="button" variant="ghost" onClick={addOption}>
+                  + Add option
+                </Button>
+              )}
               <Button type="submit">Add question</Button>
             </div>
           </form>

@@ -236,12 +236,20 @@ components:
 
     QuestionStarted:
       type: object
-      required: [questionIndex, questionId, prompt, options, timed, timeLimitSeconds, totalQuestions]
+      required: [questionIndex, questionId, type, prompt, options, timed, timeLimitSeconds, totalQuestions]
       properties:
         questionIndex:
           type: integer
         questionId:
           type: string
+        type:
+          type: string
+          enum: [multiple_choice, free_text]
+          description: >
+            Determines how the client should collect an answer: option
+            buttons for multiple_choice, a text field (max 500 characters)
+            for free_text. free_text questions always have an empty
+            options array.
         prompt:
           type: string
         options:
@@ -255,6 +263,35 @@ components:
           type: integer
         totalQuestions:
           type: integer
+        yourAnswer:
+          $ref: "#/components/schemas/YourAnswer"
+
+    YourAnswer:
+      type: object
+      required: [pending]
+      description: >
+        Present on question.started only when the recipient has already
+        answered this question — this happens when the admin resumes live
+        play after reviewing an earlier question, or when a player
+        reconnects mid-question, both of which redeliver question.started
+        for a question that may not actually be fresh to this client.
+        Its absence means the client has not answered yet.
+      properties:
+        optionId:
+          type: string
+          description: Set for a multiple_choice answer.
+        text:
+          type: string
+          description: Set for a free_text answer.
+        pending:
+          type: boolean
+          description: True for a free_text answer not yet graded by the admin.
+        correct:
+          type: boolean
+          description: Meaningless while pending.
+        pointsAwarded:
+          type: integer
+          description: Meaningless while pending.
 
     AnswerCount:
       type: object
@@ -267,7 +304,12 @@ components:
 
     QuestionEnded:
       type: object
-      required: [questionIndex, questionId, correctOptionId, answerCounts]
+      required: [questionIndex, questionId, answerCounts]
+      description: >
+        correctOptionId is only present for multiple_choice questions —
+        free_text questions have no automatic verdict, so answerCounts is
+        always empty for them too. A free_text player instead receives a
+        second answer.result once the admin grades their answer by hand.
       properties:
         questionIndex:
           type: integer
@@ -282,12 +324,13 @@ components:
 
     QuestionReviewed:
       type: object
-      required: [questionIndex, questionId, prompt, options, correctOptionId, answerCounts, totalQuestions]
+      required: [questionIndex, questionId, prompt, options, answerCounts, totalQuestions]
       description: >
         A read-only recap of a previous question, sent when the admin goes
         back. Unlike question.started, the correct answer is already known
         (it was already revealed), and clients must not offer a way to
-        answer it.
+        answer it. correctOptionId and answerCounts are only meaningful
+        for multiple_choice — free_text has no per-option breakdown.
       properties:
         questionIndex:
           type: integer
@@ -323,7 +366,13 @@ components:
 
     AnswerResult:
       type: object
-      required: [questionId, correct, pointsAwarded, totalScore]
+      required: [questionId, correct, pointsAwarded, totalScore, pending]
+      description: >
+        Sent once when a multiple_choice answer is scored automatically.
+        For free_text, sent twice: first right after submission with
+        pending true (correct/pointsAwarded not yet meaningful), then
+        again once the admin grades it by hand with pending false and the
+        final verdict.
       properties:
         questionId:
           type: string
@@ -333,10 +382,12 @@ components:
           type: integer
         totalScore:
           type: integer
+        pending:
+          type: boolean
 
     LeaderboardEntry:
       type: object
-      required: [clientId, nickname, score, rank]
+      required: [clientId, nickname, score, rank, color]
       properties:
         clientId:
           type: string
@@ -346,6 +397,12 @@ components:
           type: integer
         rank:
           type: integer
+        color:
+          type: string
+          description: >
+            One of a small, curated set of cosmos-themed color IDs (see
+            the REST API's PlayerColor schema) — not a full color range.
+          enum: [nebula, comet, nova, quasar, solar, crimson]
 
     LeaderboardUpdated:
       type: object
@@ -381,9 +438,16 @@ components:
 
     AnswerSubmit:
       type: object
-      required: [questionId, optionId]
+      required: [questionId]
+      description: >
+        Exactly one of optionId (multiple_choice) or text (free_text,
+        max 500 characters) must be set, matching the current question's
+        type.
       properties:
         questionId:
           type: string
         optionId:
           type: string
+        text:
+          type: string
+          maxLength: 500

@@ -138,7 +138,10 @@ func (h *Handlers) ReviewQuestion(ctx context.Context, req api.ReviewQuestionReq
 		// Switching back to the actual current question resumes live
 		// play — it may still be open for answers, and question.reviewed
 		// always reveals the correct answer, which would leak it early.
-		h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(
+		// BroadcastQuestionStarted (not a plain Broadcast) personalizes
+		// each recipient's copy with their own answer, if they already
+		// submitted one before the admin reviewed away and back.
+		h.hub.BroadcastQuestionStarted(ctx, req.GameId, questionStartedPayload(
 			result.Question, int(result.Question.Position), result.Game.TotalQuestions, result.Game.QuizTimed,
 		))
 	} else {
@@ -206,6 +209,7 @@ func questionStartedPayload(q service.QuestionWithOptions, index, total int, tim
 	return ws.QuestionStarted{
 		QuestionIndex:    int64(index),
 		QuestionID:       q.ID.String(),
+		Type:             ws.Type(q.Type),
 		Prompt:           q.Prompt,
 		Options:          options,
 		Timed:            timed,
@@ -216,15 +220,17 @@ func questionStartedPayload(q service.QuestionWithOptions, index, total int, tim
 
 // questionReviewedPayload renders a read-only recap of a question that's
 // already been through question.ended — the correct answer is included
-// up front, unlike questionStartedPayload.
+// up front, unlike questionStartedPayload. correctOptionId/answerCounts
+// only apply to multiple_choice; free_text has neither.
 func questionReviewedPayload(q service.QuestionWithOptions, total int, counts map[uuid.UUID]int) ws.QuestionReviewed {
 	options := make([]ws.QuestionOption, len(q.Options))
-	var correctID string
+	var correctID *string
 	answerCounts := make([]ws.AnswerCount, 0, len(q.Options))
 	for i, o := range q.Options {
 		options[i] = ws.QuestionOption{ID: o.ID.String(), Text: o.Text}
 		if o.IsCorrect {
-			correctID = o.ID.String()
+			id := o.ID.String()
+			correctID = &id
 		}
 		answerCounts = append(answerCounts, ws.AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
 	}
@@ -240,11 +246,12 @@ func questionReviewedPayload(q service.QuestionWithOptions, total int, counts ma
 }
 
 func questionEndedPayload(q service.QuestionWithOptions, index int, counts map[uuid.UUID]int) ws.QuestionEnded {
-	var correctID string
+	var correctID *string
 	answerCounts := make([]ws.AnswerCount, 0, len(q.Options))
 	for _, o := range q.Options {
 		if o.IsCorrect {
-			correctID = o.ID.String()
+			id := o.ID.String()
+			correctID = &id
 		}
 		answerCounts = append(answerCounts, ws.AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
 	}
@@ -259,7 +266,7 @@ func questionEndedPayload(q service.QuestionWithOptions, index int, counts map[u
 func leaderboardEntriesPayload(entries []service.LeaderboardEntry) []ws.LeaderboardEntry {
 	out := make([]ws.LeaderboardEntry, len(entries))
 	for i, e := range entries {
-		out[i] = ws.LeaderboardEntry{ClientID: e.ClientID.String(), Nickname: e.Nickname, Score: int64(e.Score), Rank: int64(e.Rank)}
+		out[i] = ws.LeaderboardEntry{ClientID: e.ClientID.String(), Nickname: e.Nickname, Score: int64(e.Score), Rank: int64(e.Rank), Color: ws.Color(e.Color)}
 	}
 	return out
 }

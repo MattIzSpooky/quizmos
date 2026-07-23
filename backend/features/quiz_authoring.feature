@@ -29,3 +29,15 @@ Feature: Quiz authoring
       | Paris  | true    |
       | Berlin | false   |
     Then the quiz should have 2 questions
+
+  Scenario: Adding a free text question
+    Given a quiz titled "General Knowledge"
+    When I add a free text question "Name a mammal"
+    Then the quiz should have 1 questions
+
+  Scenario: A free text question cannot have options
+    Given a quiz titled "General Knowledge"
+    When I try to add a free text question "Name a mammal" with options:
+      | text | correct |
+      | Dog  | true    |
+    Then the request should fail with status 400

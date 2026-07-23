@@ -26,13 +26,17 @@ func (h *Handlers) CreateQuestion(ctx context.Context, req api.CreateQuestionReq
 		points = *req.Body.Points
 	}
 
-	question, err := h.svc.CreateQuestion(ctx, req.QuizId, string(req.Body.Type), req.Body.Prompt, timeLimit, points, createQuestionOptionsToService(req.Body.Options))
+	var options []api.CreateQuestionOption
+	if req.Body.Options != nil {
+		options = *req.Body.Options
+	}
+	question, err := h.svc.CreateQuestion(ctx, req.QuizId, string(req.Body.Type), req.Body.Prompt, timeLimit, points, createQuestionOptionsToService(options))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrNotFound):
 			return api.CreateQuestion404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
 		case errors.Is(err, service.ErrValidation):
-			return api.CreateQuestion400JSONResponse{BadRequestJSONResponse: badRequestQuestion("a question needs at least 2 options")}, nil
+			return api.CreateQuestion400JSONResponse{BadRequestJSONResponse: badRequestQuestion("multiple_choice needs at least 2 options; free_text must not have any")}, nil
 		}
 		return nil, err
 	}
@@ -73,7 +77,7 @@ func (h *Handlers) UpdateQuestion(ctx context.Context, req api.UpdateQuestionReq
 		case errors.Is(err, service.ErrNotFound):
 			return api.UpdateQuestion404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
 		case errors.Is(err, service.ErrValidation):
-			return api.UpdateQuestion400JSONResponse{BadRequestJSONResponse: badRequestQuestion("a question needs at least 2 options")}, nil
+			return api.UpdateQuestion400JSONResponse{BadRequestJSONResponse: badRequestQuestion("multiple_choice needs at least 2 options; free_text must not have any")}, nil
 		}
 		return nil, err
 	}
