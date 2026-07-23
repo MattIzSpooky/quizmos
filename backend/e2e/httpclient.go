@@ -91,6 +91,17 @@ func (w *World) adminRequest(ctx context.Context, method, path string, body any)
 // request shape a real browser's FormData upload produces, for the
 // question-media upload endpoint.
 func (w *World) uploadMedia(ctx context.Context, path, filename, contentType string, data []byte) (apiResponse, error) {
+	return w.uploadMediaAs(ctx, path, w.adminToken, filename, contentType, data)
+}
+
+// uploadMediaAs is uploadMedia with an explicit bearer token (or "" for
+// none) — for auth scenarios, where the media endpoints check
+// Authorization themselves rather than through the usual OpenAPI
+// security scheme (see internal/handlers/media.go), so exercising that
+// needs a real multipart body: a non-multipart request never reaches the
+// handler's own auth check at all (the strict server's generated
+// wrapper calls r.MultipartReader() first and errors out before that).
+func (w *World) uploadMediaAs(ctx context.Context, path, token, filename, contentType string, data []byte) (apiResponse, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	partHeader := textproto.MIMEHeader{}
@@ -112,7 +123,9 @@ func (w *World) uploadMedia(ctx context.Context, path, filename, contentType str
 		return apiResponse{}, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+w.adminToken)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -6,7 +6,7 @@ import { useRequireAdmin } from "../lib/auth/useRequireAdmin";
 import type { components } from "../lib/api/schema.gen";
 import { AdminHeader } from "../components/AdminHeader";
 import { AudioPlayer } from "../components/AudioPlayer";
-import { Button, Field, Panel, StarToggle, Toggle } from "../components/ui";
+import { Button, Field, InlineEditableText, Panel, StarToggle, Toggle } from "../components/ui";
 
 type QuizDetail = components["schemas"]["QuizDetail"];
 type QuestionType = components["schemas"]["QuestionType"];
@@ -139,6 +139,23 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
     await adminApi.PATCH("/admin/quizzes/{quizId}", { params: { path: { quizId } }, body: { timed } });
   }
 
+  async function renameQuiz(title: string) {
+    setQuiz((prev) => (prev ? { ...prev, title } : prev));
+    await adminApi.PATCH("/admin/quizzes/{quizId}", { params: { path: { quizId } }, body: { title } });
+  }
+
+  async function renameQuestion(questionId: string, prompt: string) {
+    setQuiz((prev) =>
+      prev
+        ? { ...prev, questions: prev.questions.map((q) => (q.id === questionId ? { ...q, prompt } : q)) }
+        : prev
+    );
+    await adminApi.PATCH("/admin/quizzes/{quizId}/questions/{questionId}", {
+      params: { path: { quizId, questionId } },
+      body: { prompt },
+    });
+  }
+
   if (!ready || !quiz) return null;
 
   return (
@@ -146,7 +163,15 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
       <AdminHeader back={{ to: "/admin/quizzes", label: "All quizzes" }} />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="truncate font-display text-2xl font-semibold text-paper">{quiz.title}</h1>
+        <h1 className="min-w-0 flex-1">
+          <InlineEditableText
+            value={quiz.title}
+            onSave={renameQuiz}
+            ariaLabel="Quiz title"
+            className="block w-full truncate font-display text-2xl font-semibold text-paper"
+            inputClassName="w-full font-display text-2xl font-semibold"
+          />
+        </h1>
         <Button onClick={startGame} disabled={quiz.questions.length === 0} className="shrink-0">
           Start a new game
         </Button>
@@ -212,7 +237,13 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
                         <circle cx="15" cy="18" r="1.5" />
                       </svg>
                     </span>
-                    <p className="min-w-0 font-medium text-paper">{q.prompt}</p>
+                    <InlineEditableText
+                      value={q.prompt}
+                      onSave={(prompt) => renameQuestion(q.id, prompt)}
+                      ariaLabel={`Prompt for question ${q.prompt}`}
+                      className="min-w-0 flex-1 whitespace-normal break-words font-medium text-paper"
+                      inputClassName="min-w-0 flex-1 font-medium"
+                    />
                   </div>
                   <button
                     onClick={() => deleteQuestion(q.id)}

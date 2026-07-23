@@ -165,6 +165,40 @@ func (q *Queries) ListGames(ctx context.Context, status pgtype.Text) ([]Game, er
 	return items, nil
 }
 
+const listGamesByQuiz = `-- name: ListGamesByQuiz :many
+SELECT id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at FROM games WHERE quiz_id = $1
+`
+
+func (q *Queries) ListGamesByQuiz(ctx context.Context, quizID uuid.UUID) ([]Game, error) {
+	rows, err := q.db.Query(ctx, listGamesByQuiz, quizID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Game
+	for rows.Next() {
+		var i Game
+		if err := rows.Scan(
+			&i.ID,
+			&i.QuizID,
+			&i.Code,
+			&i.Status,
+			&i.CurrentQuestionIndex,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.EndedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setCurrentQuestionIndex = `-- name: SetCurrentQuestionIndex :one
 UPDATE games
 SET current_question_index = $2

@@ -44,6 +44,18 @@ export default function AdminQuizzes() {
     if (data) navigate(`/admin/games/${data.id}`);
   }
 
+  async function deleteQuiz(quizId: string, title: string) {
+    if (
+      !window.confirm(
+        `Delete "${title}"? This also removes every game, player, and answer created from it, and any uploaded question media. This can't be undone.`
+      )
+    ) {
+      return;
+    }
+    await adminApi.DELETE("/admin/quizzes/{quizId}", { params: { path: { quizId } } });
+    load();
+  }
+
   if (!ready) return null;
 
   return (
@@ -96,14 +108,24 @@ export default function AdminQuizzes() {
                       {q.questionCount} question{q.questionCount === 1 ? "" : "s"}
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    onClick={() => startGame(q.id)}
-                    disabled={q.questionCount === 0}
-                    className="shrink-0"
-                  >
-                    New game
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      onClick={() => startGame(q.id)}
+                      disabled={q.questionCount === 0}
+                    >
+                      New game
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => deleteQuiz(q.id, q.title)}
+                      title="Delete quiz and everything created from it"
+                      aria-label={`Delete "${q.title}"`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-void-3 text-lg font-semibold text-flare/80 transition hover:border-flare hover:text-flare"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </Panel>
               </li>
             ))}

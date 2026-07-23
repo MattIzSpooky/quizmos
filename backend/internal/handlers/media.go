@@ -19,6 +19,19 @@ func isForbidden(err error) bool {
 	return errors.As(err, &withStatus) && withStatus.HTTPStatus() == http.StatusForbidden
 }
 
+// authHeaderValue reads an optional Authorization header param as a
+// plain string, treating a completely absent header the same as an
+// empty one — both fail RequireAdminToken's "Bearer " prefix check the
+// same way, so a missing header still reaches the handler's own auth
+// check (and its proper 401 JSON response) instead of failing earlier
+// in generated parameter-binding code with a raw 400.
+func authHeaderValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // UploadQuestionMedia and DeleteQuestionMedia check the Authorization
 // header themselves, rather than relying on the OpenAPI request
 // validator's usual security-scheme enforcement — see the Authorization
@@ -26,7 +39,7 @@ func isForbidden(err error) bool {
 // would otherwise consume the multipart body before the handler gets a
 // chance to stream it to storage.
 func (h *Handlers) UploadQuestionMedia(ctx context.Context, req api.UploadQuestionMediaRequestObject) (api.UploadQuestionMediaResponseObject, error) {
-	if _, err := h.keycloak.RequireAdminToken(req.Params.Authorization); err != nil {
+	if _, err := h.keycloak.RequireAdminToken(authHeaderValue(req.Params.Authorization)); err != nil {
 		if isForbidden(err) {
 			return api.UploadQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
 		}
@@ -69,7 +82,7 @@ func (h *Handlers) UploadQuestionMedia(ctx context.Context, req api.UploadQuesti
 }
 
 func (h *Handlers) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuestionMediaRequestObject) (api.DeleteQuestionMediaResponseObject, error) {
-	if _, err := h.keycloak.RequireAdminToken(req.Params.Authorization); err != nil {
+	if _, err := h.keycloak.RequireAdminToken(authHeaderValue(req.Params.Authorization)); err != nil {
 		if isForbidden(err) {
 			return api.DeleteQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
 		}

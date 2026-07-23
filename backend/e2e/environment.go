@@ -33,11 +33,13 @@ import (
 )
 
 const (
-	e2eAdminUsername = "admin@quizmos.dev"
-	e2eAdminPassword = "quizmos-dev"
-	e2eClientID      = "quizmos-e2e"
-	e2eAdminRole     = "quiz-admin"
-	e2eMediaBucket   = "quizmos-media-test"
+	e2eAdminUsername  = "admin@quizmos.dev"
+	e2eAdminPassword  = "quizmos-dev"
+	e2eNoRoleUsername = "no-role@quizmos.dev"
+	e2eNoRolePassword = "quizmos-dev"
+	e2eClientID       = "quizmos-e2e"
+	e2eAdminRole      = "quiz-admin"
+	e2eMediaBucket    = "quizmos-media-test"
 )
 
 // environment owns every long-lived resource for one test run: both
@@ -213,11 +215,23 @@ func (e *environment) truncateAll(ctx context.Context) error {
 // client), exercising the same tokens the production auth middleware
 // validates.
 func (e *environment) adminToken(ctx context.Context) (string, error) {
+	return e.tokenFor(ctx, e2eAdminUsername, e2eAdminPassword)
+}
+
+// noRoleToken is the same real-Keycloak token exchange as adminToken, but
+// for a seeded user with no realm roles at all — a validly-authenticated
+// account that just isn't quiz-admin, for verifying admin endpoints
+// reject it with 403 rather than 401.
+func (e *environment) noRoleToken(ctx context.Context) (string, error) {
+	return e.tokenFor(ctx, e2eNoRoleUsername, e2eNoRolePassword)
+}
+
+func (e *environment) tokenFor(ctx context.Context, username, password string) (string, error) {
 	form := url.Values{
 		"client_id":  {e2eClientID},
 		"grant_type": {"password"},
-		"username":   {e2eAdminUsername},
-		"password":   {e2eAdminPassword},
+		"username":   {username},
+		"password":   {password},
 		"scope":      {"openid roles"},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,

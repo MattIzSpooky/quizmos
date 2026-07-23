@@ -44,6 +44,7 @@ type Querier interface {
 	LeaderboardByGame(ctx context.Context, gameID uuid.UUID) ([]LeaderboardByGameRow, error)
 	ListFreeTextAnswersForQuestion(ctx context.Context, arg ListFreeTextAnswersForQuestionParams) ([]ListFreeTextAnswersForQuestionRow, error)
 	ListGames(ctx context.Context, status pgtype.Text) ([]Game, error)
+	ListGamesByQuiz(ctx context.Context, quizID uuid.UUID) ([]Game, error)
 	ListOptionsByQuestion(ctx context.Context, questionID uuid.UUID) ([]QuestionOption, error)
 	ListOptionsByQuestionIDs(ctx context.Context, questionIds []uuid.UUID) ([]QuestionOption, error)
 	ListPlayersByGame(ctx context.Context, gameID uuid.UUID) ([]Player, error)

@@ -59,14 +59,18 @@ func (h *Handlers) UpdateQuiz(ctx context.Context, req api.UpdateQuizRequestObje
 }
 
 func (h *Handlers) DeleteQuiz(ctx context.Context, req api.DeleteQuizRequestObject) (api.DeleteQuizResponseObject, error) {
-	if err := h.svc.DeleteQuiz(ctx, req.QuizId); err != nil {
-		switch {
-		case errors.Is(err, service.ErrNotFound):
+	gameIDs, err := h.svc.DeleteQuiz(ctx, req.QuizId)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
 			return api.DeleteQuiz404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "quiz not found"))}, nil
-		case errors.Is(err, service.ErrConflict):
-			return api.DeleteQuiz409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(apiError("conflict", "a game has already been created from this quiz"))}, nil
 		}
 		return nil, err
+	}
+	// Any game played from this quiz is gone too now — disconnect anyone
+	// still connected to its room rather than leaving them hanging on a
+	// game that no longer exists.
+	for _, gameID := range gameIDs {
+		h.hub.CloseRoom(gameID)
 	}
 	return api.DeleteQuiz204Response{}, nil
 }

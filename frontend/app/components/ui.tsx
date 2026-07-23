@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
 export function Panel({
@@ -92,6 +93,73 @@ export function Toggle({
         />
       </button>
     </label>
+  );
+}
+
+/**
+ * Click-to-rename text: a plain label until clicked, then an input that
+ * saves on blur/Enter and discards the edit on Escape. Used for a quiz's
+ * title and a question's prompt — anywhere a short bit of text is the
+ * thing being renamed rather than a whole form field with its own label.
+ */
+export function InlineEditableText({
+  value,
+  onSave,
+  ariaLabel,
+  className = "",
+  inputClassName = "",
+}: {
+  value: string;
+  onSave: (next: string) => void;
+  ariaLabel: string;
+  className?: string;
+  inputClassName?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  function startEditing() {
+    setDraft(value);
+    setEditing(true);
+  }
+
+  function commit() {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== value) onSave(trimmed);
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setEditing(false);
+          }
+        }}
+        aria-label={ariaLabel}
+        className={`rounded-lg border border-aurora bg-void px-2 py-1 outline-none ${inputClassName}`}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={startEditing}
+      title="Click to rename"
+      className={`rounded-lg px-1 py-0.5 text-left transition hover:bg-void-3/60 ${className}`}
+    >
+      {value}
+    </button>
   );
 }
 

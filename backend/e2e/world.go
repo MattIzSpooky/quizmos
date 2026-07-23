@@ -189,6 +189,13 @@ type World struct {
 
 	players map[string]*player // nickname -> player
 
+	// lastMediaURL is the public URL of the most recently uploaded
+	// question media, kept around so a later step can confirm it's been
+	// deleted from storage (e.g. after the owning quiz is deleted) —
+	// by then the question itself is gone, so there's no API left to
+	// look the URL back up through.
+	lastMediaURL string
+
 	lastResponse apiResponse
 	lastErr      error
 }

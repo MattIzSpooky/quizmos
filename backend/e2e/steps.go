@@ -50,6 +50,12 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	})
 
 	sc.Step(`^I am authenticated as an admin$`, iAmAuthenticatedAsAnAdmin)
+	sc.Step(`^I request the admin quizzes list with no bearer token$`, iRequestTheAdminQuizzesListWithNoBearerToken)
+	sc.Step(`^I request the admin quizzes list with an invalid bearer token$`, iRequestTheAdminQuizzesListWithAnInvalidBearerToken)
+	sc.Step(`^I request the admin quizzes list as a user without the admin role$`, iRequestTheAdminQuizzesListAsAUserWithoutTheAdminRole)
+	sc.Step(`^I try to upload media with no bearer token$`, iTryToUploadMediaWithNoBearerToken)
+	sc.Step(`^I try to upload media with an invalid bearer token$`, iTryToUploadMediaWithAnInvalidBearerToken)
+	sc.Step(`^I try to upload media as a user without the admin role$`, iTryToUploadMediaAsAUserWithoutTheAdminRole)
 
 	sc.Step(`^(?:I create a|a) quiz titled "([^"]*)"$`, aQuizTitled)
 	sc.Step(`^(?:I create an|an) untimed quiz titled "([^"]*)"$`, anUntimedQuizTitled)
@@ -67,8 +73,9 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^I update the quiz to title "([^"]*)" and timed (true|false)$`, iUpdateTheQuizToTitleAndTimed)
 	sc.Step(`^the quiz should be titled "([^"]*)" and (timed|untimed)$`, theQuizShouldBeTitledAndTimed)
 	sc.Step(`^I delete the quiz$`, iDeleteTheQuiz)
-	sc.Step(`^I try to delete the quiz$`, iTryToDeleteTheQuiz)
 	sc.Step(`^getting the quiz should fail with status (\d+)$`, gettingTheQuizShouldFailWithStatus)
+	sc.Step(`^getting the game should fail with status (\d+)$`, gettingTheGameShouldFailWithStatus)
+	sc.Step(`^the previously uploaded media should no longer be reachable$`, thePreviouslyUploadedMediaShouldNoLongerBeReachable)
 	sc.Step(`^getting an unknown quiz should fail with status (\d+)$`, gettingAnUnknownQuizShouldFailWithStatus)
 	sc.Step(`^the quiz list should include "([^"]*)" and "([^"]*)"$`, theQuizListShouldInclude)
 	sc.Step(`^the game list should include this game$`, theGameListShouldIncludeThisGame)
@@ -147,6 +154,77 @@ func iAmAuthenticatedAsAnAdmin(ctx context.Context) error {
 	}
 	w.adminToken = token
 	return nil
+}
+
+// --- admin auth ----------------------------------------------------------
+//
+// These exercise the actual wired-together request pipeline (chi router
+// -> openapi3filter -> Keycloak.AuthenticationFunc, or, for the two
+// media routes, the handler's own manual check — see
+// internal/handlers/media.go) rather than the auth package in isolation,
+// which is already covered by unit tests. Every other admin step in this
+// suite always uses a valid w.adminToken, so without these, a broken
+// security wiring (e.g. a route accidentally left off the security
+// scheme, or the media Skipper misconfigured) would go unnoticed.
+
+const invalidBearerToken = "not-a-real-token"
+
+func iRequestTheAdminQuizzesListWithNoBearerToken(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.request(ctx, http.MethodGet, "/admin/quizzes", "", "", nil)
+	w.lastResponse = resp
+	return err
+}
+
+func iRequestTheAdminQuizzesListWithAnInvalidBearerToken(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.request(ctx, http.MethodGet, "/admin/quizzes", invalidBearerToken, "", nil)
+	w.lastResponse = resp
+	return err
+}
+
+func iRequestTheAdminQuizzesListAsAUserWithoutTheAdminRole(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	token, err := w.env.noRoleToken(ctx)
+	if err != nil {
+		return err
+	}
+	resp, err := w.request(ctx, http.MethodGet, "/admin/quizzes", token, "", nil)
+	w.lastResponse = resp
+	return err
+}
+
+// fakeMediaPath builds a syntactically valid question-media URL under
+// the scenario's quiz without needing a real question — the auth check
+// in both media handlers runs before any question lookup, so a
+// nonexistent question id doesn't affect what's being tested here.
+func fakeMediaPath(w *World) string {
+	return fmt.Sprintf("/admin/quizzes/%s/questions/%s/media", w.quizID, uuid.NewString())
+}
+
+func iTryToUploadMediaWithNoBearerToken(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.uploadMediaAs(ctx, fakeMediaPath(w), "", "test.png", "image/png", []byte("x"))
+	w.lastResponse = resp
+	return err
+}
+
+func iTryToUploadMediaWithAnInvalidBearerToken(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.uploadMediaAs(ctx, fakeMediaPath(w), invalidBearerToken, "test.png", "image/png", []byte("x"))
+	w.lastResponse = resp
+	return err
+}
+
+func iTryToUploadMediaAsAUserWithoutTheAdminRole(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	token, err := w.env.noRoleToken(ctx)
+	if err != nil {
+		return err
+	}
+	resp, err := w.uploadMediaAs(ctx, fakeMediaPath(w), token, "test.png", "image/png", []byte("x"))
+	w.lastResponse = resp
+	return err
 }
 
 // --- quiz authoring -----------------------------------------------------
@@ -457,15 +535,38 @@ func iDeleteTheQuiz(ctx context.Context) error {
 	return nil
 }
 
-// iTryToDeleteTheQuiz is iDeleteTheQuiz without asserting success — for
-// the rejection scenario, where deleting is expected to fail (see
-// Service.DeleteQuiz: a quiz with any game is ON DELETE RESTRICT).
-func iTryToDeleteTheQuiz(ctx context.Context) error {
+func gettingTheGameShouldFailWithStatus(ctx context.Context, want int) error {
 	w := worldFromContext(ctx)
-	path := fmt.Sprintf("/admin/quizzes/%s", w.quizID)
-	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
-	w.lastResponse = resp
-	return err
+	path := fmt.Sprintf("/admin/games/%s", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d getting game, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+// thePreviouslyUploadedMediaShouldNoLongerBeReachable confirms a
+// question's media object was actually removed from storage (not just
+// that the DB row referencing it is gone) — fetches the URL captured by
+// the last theAdminUploadsImageMediaFor/theAdminUploadsAudioMediaFor
+// call and expects a 404, the same as any other deleted object.
+func thePreviouslyUploadedMediaShouldNoLongerBeReachable(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	if w.lastMediaURL == "" {
+		return fmt.Errorf("no media URL was captured by an earlier upload step")
+	}
+	resp, err := http.Get(w.lastMediaURL)
+	if err != nil {
+		return fmt.Errorf("fetching %q: %w", w.lastMediaURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("expected 404 fetching deleted media %q, got %d", w.lastMediaURL, resp.StatusCode)
+	}
+	return nil
 }
 
 func gettingTheQuizShouldFailWithStatus(ctx context.Context, want int) error {
@@ -618,6 +719,7 @@ func theAdminUploadsImageMediaFor(ctx context.Context, prompt string) error {
 	if resp.Status != http.StatusOK {
 		return fmt.Errorf("expected 200 uploading image media, got %d: %v", resp.Status, resp.Body)
 	}
+	w.lastMediaURL, _ = resp.Body["mediaUrl"].(string)
 	return verifyUploadedMediaRoundTrips(resp, data)
 }
 
@@ -639,6 +741,7 @@ func theAdminUploadsAudioMediaFor(ctx context.Context, prompt string) error {
 	if resp.Status != http.StatusOK {
 		return fmt.Errorf("expected 200 uploading audio media, got %d: %v", resp.Status, resp.Body)
 	}
+	w.lastMediaURL, _ = resp.Body["mediaUrl"].(string)
 	return verifyUploadedMediaRoundTrips(resp, data)
 }
 

@@ -86,6 +86,21 @@
       "realmRoles": [
         "quiz-admin"
       ]
+    },
+    {
+      "username": "no-role@quizmos.dev",
+      "email": "no-role@quizmos.dev",
+      "firstName": "No",
+      "lastName": "Role",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "quizmos-dev",
+          "temporary": false
+        }
+      ]
     }
   ]
 }

@@ -2,19 +2,14 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 )
-
-// pgForeignKeyViolation is Postgres's SQLSTATE for a foreign-key
-// constraint violation (23503).
-const pgForeignKeyViolation = "23503"
 
 type QuizWithCount struct {
 	db.Quiz
@@ -93,24 +88,50 @@ func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, descripti
 	return QuizWithCount{Quiz: q, QuestionCount: int(count)}, nil
 }
 
-// DeleteQuiz removes a quiz and its questions (cascading). A quiz that
-// still has any game created from it — lobby, in-progress, or ended —
-// can't be deleted: games.quiz_id is ON DELETE RESTRICT, since a game is
-// a historical record of a play session and shouldn't silently lose the
-// quiz it was played from.
-func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) error {
+// DeleteQuiz removes a quiz along with everything created from it: its
+// questions (and their options), and — now that games.quiz_id cascades
+// rather than restricting — every game ever played from it, including
+// their players and answers. The one thing a SQL cascade can't reach is
+// question media sitting in MinIO, so that's cleaned up here explicitly
+// after the row is gone; a failed object delete is logged rather than
+// failing the request, since the quiz itself is already gone by then and
+// an orphaned blob is a storage-cleanup concern, not a correctness one.
+//
+// The returned game IDs are for the caller (the REST handler, which
+// alone holds the websocket hub) to close out any live connections still
+// pointing at a game that no longer exists.
+func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	questions, err := s.q.ListQuestionsByQuiz(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	games, err := s.q.ListGamesByQuiz(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
 	n, err := s.q.DeleteQuiz(ctx, id)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
-			return ErrConflict
-		}
-		return err
+		return nil, err
 	}
 	if n == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+
+	for _, q := range questions {
+		if !q.MediaKey.Valid {
+			continue
+		}
+		if err := s.store.Delete(ctx, q.MediaKey.String); err != nil {
+			log.Printf("service: delete media %q after deleting quiz %s: %v", q.MediaKey.String, id, err)
+		}
+	}
+
+	gameIDs := make([]uuid.UUID, len(games))
+	for i, g := range games {
+		gameIDs[i] = g.ID
+	}
+	return gameIDs, nil
 }
 
 func (s *Service) requireQuiz(ctx context.Context, id uuid.UUID) error {

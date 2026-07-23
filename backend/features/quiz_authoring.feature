@@ -106,15 +106,19 @@ Feature: Quiz authoring
     When I delete the quiz
     Then getting the quiz should fail with status 404
 
-  Scenario: Deleting a quiz that already has a game is rejected
+  Scenario: Deleting a quiz also removes its games, players, and media
     Given a quiz titled "General Knowledge"
     And a multiple choice question "What is 2 + 2?" with options:
       | text | correct |
       | 3    | false   |
       | 4    | true    |
+    And the admin uploads an image as media for "What is 2 + 2?"
     And I create a game for the quiz
-    When I try to delete the quiz
-    Then the request should fail with status 409
+    And "Alice" joins the game
+    When I delete the quiz
+    Then getting the quiz should fail with status 404
+    And getting the game should fail with status 404
+    And the previously uploaded media should no longer be reachable
 
   Scenario: Getting a quiz that doesn't exist fails
     Then getting an unknown quiz should fail with status 404

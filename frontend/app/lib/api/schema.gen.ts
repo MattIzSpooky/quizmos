@@ -35,7 +35,7 @@ export interface paths {
         get: operations["getQuiz"];
         put?: never;
         post?: never;
-        /** Delete a quiz and its questions. Rejected with 409 if any game has ever been created from it (lobby, in-progress, or ended) — a game is a historical record of a play session and shouldn't silently lose the quiz it was played from. */
+        /** Delete a quiz and everything created from it: its questions, every game ever played from it (lobby, in-progress, or ended) along with their players and answers, and any question media stored in object storage. */
         delete: operations["deleteQuiz"];
         options?: never;
         head?: never;
@@ -107,9 +107,9 @@ export interface paths {
     "/admin/quizzes/{quizId}/questions/{questionId}/media": {
         parameters: {
             query?: never;
-            header: {
-                /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
-                Authorization: components["parameters"]["Authorization"];
+            header?: {
+                /** @description "Bearer <token>". Declared as a plain, optional header parameter (checked manually in the handler, which treats an absent header the same as an empty one) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. Marking it required would fail a request missing this header in generated parameter-binding code before the handler gets a chance to — bypassing the manual check entirely and returning a raw 400 instead of the intended 401. */
+                Authorization?: components["parameters"]["Authorization"];
             };
             path: {
                 quizId: components["parameters"]["QuizId"];
@@ -619,7 +619,7 @@ export interface components {
         GameId: string;
         ClientId: string;
         OptionalClientId: string;
-        /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
+        /** @description "Bearer <token>". Declared as a plain, optional header parameter (checked manually in the handler, which treats an absent header the same as an empty one) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. Marking it required would fail a request missing this header in generated parameter-binding code before the handler gets a chance to — bypassing the manual check entirely and returning a raw 400 instead of the intended 401. */
         Authorization: string;
     };
     requestBodies: never;
@@ -722,7 +722,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
         };
     };
     updateQuiz: {
@@ -923,9 +922,9 @@ export interface operations {
     uploadQuestionMedia: {
         parameters: {
             query?: never;
-            header: {
-                /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
-                Authorization: components["parameters"]["Authorization"];
+            header?: {
+                /** @description "Bearer <token>". Declared as a plain, optional header parameter (checked manually in the handler, which treats an absent header the same as an empty one) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. Marking it required would fail a request missing this header in generated parameter-binding code before the handler gets a chance to — bypassing the manual check entirely and returning a raw 400 instead of the intended 401. */
+                Authorization?: components["parameters"]["Authorization"];
             };
             path: {
                 quizId: components["parameters"]["QuizId"];
@@ -960,9 +959,9 @@ export interface operations {
     deleteQuestionMedia: {
         parameters: {
             query?: never;
-            header: {
-                /** @description "Bearer <token>". Declared as a plain header parameter (checked manually in the handler) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. */
-                Authorization: components["parameters"]["Authorization"];
+            header?: {
+                /** @description "Bearer <token>". Declared as a plain, optional header parameter (checked manually in the handler, which treats an absent header the same as an empty one) rather than a bearerAuth security scheme, and excluded from the usual OpenAPI request validation — both specifically for the media upload/delete operations, whose multipart request body must reach the handler unconsumed. The standard validator reads the whole multipart body to validate it, which would leave nothing for the handler to stream to storage. Marking it required would fail a request missing this header in generated parameter-binding code before the handler gets a chance to — bypassing the manual check entirely and returning a raw 400 instead of the intended 401. */
+                Authorization?: components["parameters"]["Authorization"];
             };
             path: {
                 quizId: components["parameters"]["QuizId"];

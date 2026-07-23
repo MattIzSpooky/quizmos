@@ -17,6 +17,9 @@ SELECT * FROM games
 WHERE sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')
 ORDER BY created_at DESC;
 
+-- name: ListGamesByQuiz :many
+SELECT * FROM games WHERE quiz_id = $1;
+
 -- name: StartGame :one
 UPDATE games
 SET status = 'in_progress', current_question_index = 0, started_at = now()
