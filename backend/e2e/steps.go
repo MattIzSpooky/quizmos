@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -553,13 +555,62 @@ func mediaPath(w *World, prompt string) (string, error) {
 	return fmt.Sprintf("/admin/quizzes/%s/questions/%s/media", w.quizID, qr.id), nil
 }
 
+// Real, valid fixture files (backend/e2e/testdata) — a tiny but genuinely
+// decodable PNG and WAV — rather than arbitrary bytes with a claimed
+// content type. go test's working directory is the package directory, so
+// these plain relative paths resolve regardless of where `go test` (or
+// the IDE) was invoked from.
+const (
+	testImageFixture = "testdata/test-image.png"
+	testAudioFixture = "testdata/test-audio.wav"
+)
+
+func readTestFixture(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read test fixture %s: %w", path, err)
+	}
+	return data, nil
+}
+
+// verifyUploadedMediaRoundTrips fetches the just-uploaded media's public
+// URL and checks the bytes served back match exactly what was uploaded —
+// proving the storage pipeline actually preserved a real file end to
+// end, not just that some HTTP status came back.
+func verifyUploadedMediaRoundTrips(resp apiResponse, want []byte) error {
+	mediaURL, _ := resp.Body["mediaUrl"].(string)
+	if mediaURL == "" {
+		return fmt.Errorf("expected a mediaUrl in the upload response, got none (body: %v)", resp.Body)
+	}
+	fetchResp, err := http.Get(mediaURL)
+	if err != nil {
+		return fmt.Errorf("fetching uploaded media: %w", err)
+	}
+	defer fetchResp.Body.Close()
+	if fetchResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected 200 fetching uploaded media %q, got %d", mediaURL, fetchResp.StatusCode)
+	}
+	got, err := io.ReadAll(fetchResp.Body)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(got, want) {
+		return fmt.Errorf("fetched media (%d bytes) doesn't match the uploaded file (%d bytes)", len(got), len(want))
+	}
+	return nil
+}
+
 func theAdminUploadsImageMediaFor(ctx context.Context, prompt string) error {
 	w := worldFromContext(ctx)
 	path, err := mediaPath(w, prompt)
 	if err != nil {
 		return err
 	}
-	resp, err := w.uploadMedia(ctx, path, "cover.png", "image/png", bytes.Repeat([]byte("img-bytes-"), 50))
+	data, err := readTestFixture(testImageFixture)
+	if err != nil {
+		return err
+	}
+	resp, err := w.uploadMedia(ctx, path, "test-image.png", "image/png", data)
 	w.lastResponse = resp
 	if err != nil {
 		return err
@@ -567,7 +618,7 @@ func theAdminUploadsImageMediaFor(ctx context.Context, prompt string) error {
 	if resp.Status != http.StatusOK {
 		return fmt.Errorf("expected 200 uploading image media, got %d: %v", resp.Status, resp.Body)
 	}
-	return nil
+	return verifyUploadedMediaRoundTrips(resp, data)
 }
 
 func theAdminUploadsAudioMediaFor(ctx context.Context, prompt string) error {
@@ -576,7 +627,11 @@ func theAdminUploadsAudioMediaFor(ctx context.Context, prompt string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := w.uploadMedia(ctx, path, "clip.mp3", "audio/mpeg", bytes.Repeat([]byte("audio-bytes-"), 50))
+	data, err := readTestFixture(testAudioFixture)
+	if err != nil {
+		return err
+	}
+	resp, err := w.uploadMedia(ctx, path, "test-audio.wav", "audio/wav", data)
 	w.lastResponse = resp
 	if err != nil {
 		return err
@@ -584,7 +639,7 @@ func theAdminUploadsAudioMediaFor(ctx context.Context, prompt string) error {
 	if resp.Status != http.StatusOK {
 		return fmt.Errorf("expected 200 uploading audio media, got %d: %v", resp.Status, resp.Body)
 	}
-	return nil
+	return verifyUploadedMediaRoundTrips(resp, data)
 }
 
 func theAdminRemovesMediaFor(ctx context.Context, prompt string) error {
@@ -604,6 +659,10 @@ func theAdminRemovesMediaFor(ctx context.Context, prompt string) error {
 	return nil
 }
 
+// uploadingOverLimitImageMediaShouldFail deliberately uses padded
+// placeholder bytes rather than testImageFixture: this is testing the
+// size cap, not file validity, and a real 8MB+ PNG isn't worth checking
+// into the repo just to pad past the limit.
 func uploadingOverLimitImageMediaShouldFail(ctx context.Context, prompt string, want int) error {
 	w := worldFromContext(ctx)
 	path, err := mediaPath(w, prompt)
