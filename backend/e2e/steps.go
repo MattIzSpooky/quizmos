@@ -61,6 +61,8 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^kicking "([^"]*)" should fail with status (\d+)$`, kickingShouldFailWithStatus)
 
 	sc.Step(`^"([^"]*)" connects to the game websocket$`, connectsToTheGameWebsocket)
+	sc.Step(`^"([^"]*)" reconnects to the game websocket$`, connectsToTheGameWebsocket)
+	sc.Step(`^"([^"]*)" disconnects$`, disconnects)
 	sc.Step(`^the admin starts the game$`, theAdminStartsTheGame)
 	sc.Step(`^starting the game should fail with status (\d+)$`, startingTheGameShouldFailWithStatus)
 	sc.Step(`^the admin advances to the next question$`, theAdminAdvancesToTheNextQuestion)
@@ -68,11 +70,14 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^going back should fail with status (\d+)$`, goingBackShouldFailWithStatus)
 	sc.Step(`^the admin reviews question (\d+)$`, theAdminReviewsQuestionN)
 	sc.Step(`^reviewing question (\d+) should fail with status (\d+)$`, reviewingQuestionNShouldFailWithStatus)
+	sc.Step(`^the admin resets the answers for question (\d+)$`, theAdminResetsAnswersForQuestionN)
+	sc.Step(`^resetting answers for question (\d+) should fail with status (\d+)$`, resettingAnswersForQuestionNShouldFailWithStatus)
 	sc.Step(`^the admin ends the game$`, theAdminEndsTheGame)
 
 	sc.Step(`^"([^"]*)" should receive a "([^"]*)" message$`, shouldReceiveAMessage)
 	sc.Step(`^"([^"]*)" should receive a "question\.started" message with timed (true|false)$`, shouldReceiveQuestionStartedWithTimed)
 	sc.Step(`^"([^"]*)" answers "([^"]*)"$`, answers)
+	sc.Step(`^"([^"]*)" answers "([^"]*)" again$`, answersAgain)
 	sc.Step(`^"([^"]*)" should receive an "answer\.result" message with correct (true|false) and (\d+) points$`, shouldReceiveAnAnswerResult)
 
 	sc.Step(`^the leaderboard should show "([^"]*)" with score (\d+)$`, theLeaderboardShouldShow)
@@ -301,6 +306,18 @@ func connectsToTheGameWebsocket(ctx context.Context, nickname string) error {
 	return w.connectPlayerSocket(ctx, p)
 }
 
+func disconnects(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if p.conn == nil {
+		return fmt.Errorf("player %q isn't connected", nickname)
+	}
+	return p.conn.CloseNow()
+}
+
 func theAdminStartsTheGame(ctx context.Context) error {
 	w := worldFromContext(ctx)
 	path := fmt.Sprintf("/admin/games/%s/start", w.gameID)
@@ -399,6 +416,30 @@ func reviewQuestionAtIndex(ctx context.Context, w *World, index, wantStatus int)
 	return nil
 }
 
+// theAdminResetsAnswersForQuestionN uses 1-based question numbers to match
+// how they're referred to in feature files ("question 1", "question 2", ...).
+func theAdminResetsAnswersForQuestionN(ctx context.Context, n int) error {
+	w := worldFromContext(ctx)
+	return resetAnswersAtIndex(ctx, w, n-1, http.StatusOK)
+}
+
+func resettingAnswersForQuestionNShouldFailWithStatus(ctx context.Context, n, want int) error {
+	w := worldFromContext(ctx)
+	return resetAnswersAtIndex(ctx, w, n-1, want)
+}
+
+func resetAnswersAtIndex(ctx context.Context, w *World, index, wantStatus int) error {
+	path := fmt.Sprintf("/admin/games/%s/reset-answers", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, map[string]any{"questionIndex": index})
+	if err != nil {
+		return err
+	}
+	if resp.Status != wantStatus {
+		return fmt.Errorf("expected status %d resetting answers for question index %d, got %d: %v", wantStatus, index, resp.Status, resp.Body)
+	}
+	return nil
+}
+
 func theAdminEndsTheGame(ctx context.Context) error {
 	w := worldFromContext(ctx)
 	path := fmt.Sprintf("/admin/games/%s/end", w.gameID)
@@ -455,6 +496,26 @@ func answers(ctx context.Context, nickname, optionText string) error {
 	if _, err := p.waitFor(ctx, ws.TypeQuestionStarted, defaultWaitTimeout); err != nil {
 		return err
 	}
+	return submitAnswer(ctx, p, optionText)
+}
+
+// answersAgain is for re-submitting after the admin resets a question's
+// answers (see theAdminResetsAnswersForQuestionN). Unlike answers, it
+// doesn't wait for any new message first — by the time a scenario reaches
+// this step it has already asserted the question.answersReset arrived (a
+// prerequisite step), and resetting never re-broadcasts question.started,
+// so there's nothing further to wait for; the player's currentQuestion is
+// already correctly populated from the original question.started.
+func answersAgain(ctx context.Context, nickname, optionText string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	return submitAnswer(ctx, p, optionText)
+}
+
+func submitAnswer(ctx context.Context, p *player, optionText string) error {
 	optionID, err := p.optionIDFor(optionText)
 	if err != nil {
 		return err

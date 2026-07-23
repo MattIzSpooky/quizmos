@@ -11,3 +11,9 @@ SELECT selected_option_id, count(*) AS answer_count
 FROM answers
 WHERE question_id = $1
 GROUP BY selected_option_id;
+
+-- name: GetAnswersForQuestion :many
+SELECT * FROM answers WHERE game_id = $1 AND question_id = $2;
+
+-- name: DeleteAnswersForQuestion :exec
+DELETE FROM answers WHERE game_id = $1 AND question_id = $2;

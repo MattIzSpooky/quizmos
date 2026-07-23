@@ -9,6 +9,7 @@ import type {
   QuestionStarted,
   QuestionEnded,
   QuestionReviewed,
+  QuestionAnswersReset,
   AnswerResult,
   LeaderboardUpdated,
   GameEnded,
@@ -24,6 +25,7 @@ export type ServerMessage =
   | { type: "question.started"; payload: QuestionStarted }
   | { type: "question.ended"; payload: QuestionEnded }
   | { type: "question.reviewed"; payload: QuestionReviewed }
+  | { type: "question.answersReset"; payload: QuestionAnswersReset }
   | { type: "answer.result"; payload: AnswerResult }
   | { type: "leaderboard.updated"; payload: LeaderboardUpdated }
   | { type: "game.ended"; payload: GameEnded }

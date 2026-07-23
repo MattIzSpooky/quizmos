@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted } from "./file";
+//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionAnswersReset, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted } from "./file";
 //
 //   const answerCount = Convert.toAnswerCount(json);
 //   const answerResult = Convert.toAnswerResult(json);
@@ -14,6 +14,7 @@
 //   const playerSummary = Convert.toPlayerSummary(json);
 //   const presencePlayerJoined = Convert.toPresencePlayerJoined(json);
 //   const presencePlayerLeft = Convert.toPresencePlayerLeft(json);
+//   const questionAnswersReset = Convert.toQuestionAnswersReset(json);
 //   const questionEnded = Convert.toQuestionEnded(json);
 //   const questionOption = Convert.toQuestionOption(json);
 //   const questionReviewed = Convert.toQuestionReviewed(json);
@@ -91,6 +92,17 @@ export interface PlayerSummary {
 export interface PresencePlayerLeft {
     clientId:    string;
     playerCount: number;
+    [property: string]: any;
+}
+
+/**
+ * Broadcast after the admin wipes every answer to a question and reverses its points. If
+ * this is the question currently live for a client, they should be allowed to answer it
+ * again.
+ */
+export interface QuestionAnswersReset {
+    questionId:    string;
+    questionIndex: number;
     [property: string]: any;
 }
 
@@ -241,6 +253,14 @@ export class Convert {
 
     public static presencePlayerLeftToJson(value: PresencePlayerLeft): string {
         return JSON.stringify(uncast(value, r("PresencePlayerLeft")), null, 2);
+    }
+
+    public static toQuestionAnswersReset(json: string): QuestionAnswersReset {
+        return cast(JSON.parse(json), r("QuestionAnswersReset"));
+    }
+
+    public static questionAnswersResetToJson(value: QuestionAnswersReset): string {
+        return JSON.stringify(uncast(value, r("QuestionAnswersReset")), null, 2);
     }
 
     public static toQuestionEnded(json: string): QuestionEnded {
@@ -474,6 +494,10 @@ const typeMap: any = {
     "PresencePlayerLeft": o([
         { json: "clientId", js: "clientId", typ: "" },
         { json: "playerCount", js: "playerCount", typ: 0 },
+    ], "any"),
+    "QuestionAnswersReset": o([
+        { json: "questionId", js: "questionId", typ: "" },
+        { json: "questionIndex", js: "questionIndex", typ: 0 },
     ], "any"),
     "QuestionEnded": o([
         { json: "answerCounts", js: "answerCounts", typ: a(r("AnswerCount")) },

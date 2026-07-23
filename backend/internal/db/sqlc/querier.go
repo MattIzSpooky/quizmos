@@ -21,6 +21,7 @@ type Querier interface {
 	CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error)
 	CreateQuestionOption(ctx context.Context, arg CreateQuestionOptionParams) (QuestionOption, error)
 	CreateQuiz(ctx context.Context, arg CreateQuizParams) (Quiz, error)
+	DeleteAnswersForQuestion(ctx context.Context, arg DeleteAnswersForQuestionParams) error
 	DeleteOptionsByQuestion(ctx context.Context, questionID uuid.UUID) error
 	DeletePlayer(ctx context.Context, arg DeletePlayerParams) (int64, error)
 	DeleteQuestion(ctx context.Context, arg DeleteQuestionParams) (int64, error)
@@ -28,6 +29,7 @@ type Querier interface {
 	EndGame(ctx context.Context, id uuid.UUID) (Game, error)
 	GameCodeExists(ctx context.Context, code string) (bool, error)
 	GetAnswer(ctx context.Context, arg GetAnswerParams) (Answer, error)
+	GetAnswersForQuestion(ctx context.Context, arg GetAnswersForQuestionParams) ([]Answer, error)
 	GetGame(ctx context.Context, id uuid.UUID) (Game, error)
 	GetGameByCode(ctx context.Context, code string) (Game, error)
 	GetOption(ctx context.Context, id uuid.UUID) (QuestionOption, error)

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 	"github.com/mattizspooky/quizmos/backend/internal/middleware"
 	"github.com/mattizspooky/quizmos/backend/internal/service"
 )
@@ -32,6 +33,14 @@ type client struct {
 type room struct {
 	mu      sync.RWMutex
 	clients map[uuid.UUID]*client
+	// reviewing tracks "we're currently showing a read-only recap of
+	// this question index" — set on question.reviewed, cleared on the
+	// next real question.started. ReviewQuestion itself never touches
+	// the database (see service.ReviewQuestion), so this in-memory flag
+	// is the *only* record that a recap is in progress; without it, a
+	// player who reconnects mid-recap would catch up to live play
+	// instead of whatever's actually on everyone else's screen.
+	reviewing *int
 }
 
 type Hub struct {
@@ -87,6 +96,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 	rm.mu.Lock()
 	rm.clients[clientID] = c
 	count := len(rm.clients)
+	reviewing := rm.reviewing
 	rm.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(r.Context())
@@ -98,6 +108,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 		Player:      PlayerSummary{ClientID: clientID.String(), Nickname: player.Nickname},
 		PlayerCount: int64(count),
 	})
+	h.sendCatchUp(ctx, game, c, reviewing)
 
 	h.readLoop(ctx, game.ID, c)
 
@@ -111,6 +122,97 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 		ClientID:    clientID.String(),
 		PlayerCount: int64(remaining),
 	})
+}
+
+// sendCatchUp gets a freshly-connected client to the same state as
+// everyone else in the room. Without it, a player who reconnects (a
+// dropped connection, a page refresh) while a question is already live
+// would just sit on the lobby screen forever: question.started only
+// ever broadcasts once, at the moment the question actually starts.
+// reviewingIndex mirrors whatever the room's in-memory recap state was
+// at the moment this client connected (see room.reviewing) — when set,
+// it takes priority over live play, so someone reconnecting mid-recap
+// sees the same read-only question everyone else on screen sees, not
+// whatever question is actually live underneath it.
+func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewingIndex *int) {
+	if game.Status == "in_progress" && reviewingIndex != nil {
+		if result, err := h.svc.ReviewQuestion(ctx, game.ID, *reviewingIndex); err == nil {
+			h.sendTo(c, TypeQuestionReviewed, questionReviewedPayload(result.Question, result.Game.TotalQuestions, result.AnswerCounts))
+			return
+		}
+		// Fall through to live catch-up below if the recap couldn't be
+		// rebuilt (e.g. the index stopped being valid in some edge case) —
+		// showing the live question is still better than showing nothing.
+	}
+
+	switch game.Status {
+	case "in_progress":
+		if !game.CurrentQuestionIndex.Valid {
+			return
+		}
+		quiz, err := h.svc.GetQuiz(ctx, game.QuizID)
+		if err != nil {
+			return
+		}
+		question, total, err := h.svc.QuestionAtIndex(ctx, game.QuizID, int(game.CurrentQuestionIndex.Int32))
+		if err != nil {
+			return
+		}
+		options := make([]QuestionOption, len(question.Options))
+		for i, o := range question.Options {
+			options[i] = QuestionOption{ID: o.ID.String(), Text: o.Text}
+		}
+		h.sendTo(c, TypeQuestionStarted, QuestionStarted{
+			QuestionIndex:    int64(question.Position),
+			QuestionID:       question.ID.String(),
+			Prompt:           question.Prompt,
+			Options:          options,
+			Timed:            quiz.Timed,
+			TimeLimitSeconds: int64(question.TimeLimitSeconds),
+			TotalQuestions:   int64(total),
+		})
+	case "ended":
+		leaderboard, err := h.svc.Leaderboard(ctx, game.ID)
+		if err != nil {
+			return
+		}
+		entries := make([]LeaderboardEntry, len(leaderboard))
+		for i, e := range leaderboard {
+			entries[i] = LeaderboardEntry{
+				ClientID: e.ClientID.String(),
+				Nickname: e.Nickname,
+				Score:    int64(e.Score),
+				Rank:     int64(e.Rank),
+			}
+		}
+		h.sendTo(c, TypeGameEnded, GameEnded{FinalLeaderboard: entries, EndedAt: game.EndedAt.Time})
+	}
+}
+
+// questionReviewedPayload mirrors handlers.questionReviewedPayload — kept
+// as its own small copy here (rather than exported and shared) since
+// handlers already imports ws, and having ws import handlers back would
+// be a cycle.
+func questionReviewedPayload(q service.QuestionWithOptions, total int, counts map[uuid.UUID]int) QuestionReviewed {
+	options := make([]QuestionOption, len(q.Options))
+	var correctID string
+	answerCounts := make([]AnswerCount, 0, len(q.Options))
+	for i, o := range q.Options {
+		options[i] = QuestionOption{ID: o.ID.String(), Text: o.Text}
+		if o.IsCorrect {
+			correctID = o.ID.String()
+		}
+		answerCounts = append(answerCounts, AnswerCount{OptionID: o.ID.String(), Count: int64(counts[o.ID])})
+	}
+	return QuestionReviewed{
+		QuestionIndex:   int64(q.Position),
+		QuestionID:      q.ID.String(),
+		Prompt:          q.Prompt,
+		Options:         options,
+		CorrectOptionID: correctID,
+		AnswerCounts:    answerCounts,
+		TotalQuestions:  int64(total),
+	}
 }
 
 func (c *client) writeLoop(ctx context.Context) {
@@ -295,15 +397,23 @@ func (h *Hub) CloseRoom(gameID uuid.UUID) {
 }
 
 // Broadcast sends payload to every client currently connected to gameID's
-// room. It is a no-op if the room doesn't exist yet (e.g. no one has
-// connected). Exported for REST admin handlers to call after mutating game
-// state.
+// room, creating the room (with no clients in it yet) if this is the
+// first thing ever broadcast for this game. Exported for REST admin
+// handlers to call after mutating game state.
 func (h *Hub) Broadcast(gameID uuid.UUID, msgType string, payload any) {
-	h.mu.RLock()
-	rm, ok := h.rooms[gameID]
-	h.mu.RUnlock()
-	if !ok {
-		return
+	rm := h.roomFor(gameID)
+
+	switch p := payload.(type) {
+	case QuestionStarted:
+		rm.mu.Lock()
+		rm.reviewing = nil
+		rm.mu.Unlock()
+	case QuestionReviewed:
+		idx := int(p.QuestionIndex)
+		rm.mu.Lock()
+		rm.reviewing = &idx
+		rm.mu.Unlock()
 	}
+
 	h.broadcastToRoom(rm, msgType, payload)
 }

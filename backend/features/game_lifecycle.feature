@@ -27,6 +27,20 @@ Feature: Game lifecycle
     When "Alice" tries to join game code "NOSUCH"
     Then the request should fail with status 404
 
+  Scenario: Joining a game that has already started is rejected
+    Given I create a game for the quiz
+    And the admin starts the game
+    When "Alice" joins the game
+    Then the request should fail with status 409
+    And the game should have 0 players
+
+  Scenario: Joining a game that has ended is rejected
+    Given I create a game for the quiz
+    And the admin starts the game
+    And the admin ends the game
+    When "Alice" joins the game
+    Then the request should fail with status 409
+
   Scenario: Starting a game with no questions is rejected
     Given I create a quiz titled "Empty quiz"
     When I create a game for the quiz
@@ -64,3 +78,10 @@ Feature: Game lifecycle
     And "Alice" connects to the game websocket
     When the admin kicks "Alice"
     Then "Alice" should receive a "player.kicked" message
+
+  Scenario: A player who joined before the game started can still connect once it's live
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    And the admin starts the game
+    When "Alice" connects to the game websocket
+    Then "Alice" should receive a "question.started" message

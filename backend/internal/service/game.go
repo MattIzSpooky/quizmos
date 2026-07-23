@@ -226,12 +226,19 @@ func (s *Service) AdvanceGame(ctx context.Context, id uuid.UUID) (AdvanceResult,
 	return result, nil
 }
 
-// ReviewResult describes the question to broadcast as a read-only recap
-// (question.reviewed) — the game's actual state is untouched.
+// ReviewResult describes the question to broadcast — the game's actual
+// state is untouched either way (see ReviewQuestion).
 type ReviewResult struct {
 	Game         GameSummary
 	Question     QuestionWithOptions
 	AnswerCounts map[uuid.UUID]int
+	// IsLive is true when targetIndex is the game's actual current
+	// question, not an earlier, already-ended one. The caller should
+	// broadcast question.started (resume live play), not
+	// question.reviewed — that question may still be open for answers,
+	// and question.reviewed always reveals the correct answer, which
+	// would leak it early.
+	IsLive bool
 }
 
 // ReviewQuestion is a pure broadcast: it never mutates the game (not the
@@ -251,7 +258,8 @@ func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex 
 	if game.Status != "in_progress" || !game.CurrentQuestionIndex.Valid {
 		return ReviewResult{}, ErrConflict
 	}
-	if targetIndex < 0 || targetIndex > int(game.CurrentQuestionIndex.Int32) {
+	currentIndex := int(game.CurrentQuestionIndex.Int32)
+	if targetIndex < 0 || targetIndex > currentIndex {
 		return ReviewResult{}, ErrValidation
 	}
 
@@ -267,7 +275,81 @@ func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex 
 	if err != nil {
 		return ReviewResult{}, err
 	}
-	return ReviewResult{Game: summary, Question: question, AnswerCounts: counts}, nil
+	return ReviewResult{
+		Game:         summary,
+		Question:     question,
+		AnswerCounts: counts,
+		IsLive:       targetIndex == currentIndex,
+	}, nil
+}
+
+// ResetAnswersResult describes the outcome of wiping a question's answers,
+// for the caller to broadcast over the websocket.
+type ResetAnswersResult struct {
+	Game        GameSummary
+	Question    QuestionWithOptions
+	Leaderboard []LeaderboardEntry
+}
+
+// ResetQuestionAnswers deletes every answer recorded for one question in
+// this game and reverses whatever points it awarded, so players can answer
+// it again. It's a recovery tool for admin mistakes (e.g. the question was
+// shown before everyone was ready), not something used every game — unlike
+// ReviewQuestion, this does mutate state. Only questions at or before the
+// game's current one can be reset, matching ReviewQuestion's rule.
+func (s *Service) ResetQuestionAnswers(ctx context.Context, id uuid.UUID, targetIndex int) (ResetAnswersResult, error) {
+	game, err := s.q.GetGame(ctx, id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return ResetAnswersResult{}, ErrNotFound
+		}
+		return ResetAnswersResult{}, err
+	}
+	if game.Status != "in_progress" || !game.CurrentQuestionIndex.Valid {
+		return ResetAnswersResult{}, ErrConflict
+	}
+	currentIndex := int(game.CurrentQuestionIndex.Int32)
+	if targetIndex < 0 || targetIndex > currentIndex {
+		return ResetAnswersResult{}, ErrValidation
+	}
+
+	question, _, err := s.QuestionAtIndex(ctx, game.QuizID, targetIndex)
+	if err != nil {
+		return ResetAnswersResult{}, err
+	}
+
+	answers, err := s.q.GetAnswersForQuestion(ctx, db.GetAnswersForQuestionParams{GameID: id, QuestionID: question.ID})
+	if err != nil {
+		return ResetAnswersResult{}, err
+	}
+
+	err = s.withTx(ctx, func(tx *Service) error {
+		if err := tx.q.DeleteAnswersForQuestion(ctx, db.DeleteAnswersForQuestionParams{GameID: id, QuestionID: question.ID}); err != nil {
+			return err
+		}
+		for _, a := range answers {
+			if a.PointsAwarded == 0 {
+				continue
+			}
+			if err := tx.q.AddPlayerScore(ctx, db.AddPlayerScoreParams{ID: a.PlayerID, Score: -a.PointsAwarded}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ResetAnswersResult{}, err
+	}
+
+	summary, err := s.summarize(ctx, game)
+	if err != nil {
+		return ResetAnswersResult{}, err
+	}
+	leaderboard, err := s.Leaderboard(ctx, id)
+	if err != nil {
+		return ResetAnswersResult{}, err
+	}
+	return ResetAnswersResult{Game: summary, Question: question, Leaderboard: leaderboard}, nil
 }
 
 type EndGameResult struct {
@@ -362,6 +444,13 @@ type JoinResult struct {
 	Player db.Player
 }
 
+// JoinGame only admits new players while the game is in the lobby. Once
+// it's in_progress, a late join would drop someone into a quiz they never
+// saw the earlier questions of with a clean scoreboard entry anyway, so
+// there's no useful "late join" here — and once ended there's nothing to
+// join at all. Reconnecting mid-game (e.g. a dropped connection) doesn't
+// go through this path: it's a websocket concern against a player row
+// that already exists, not a fresh join.
 func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID, nickname string) (JoinResult, error) {
 	game, err := s.q.GetGameByCode(ctx, code)
 	if err != nil {
@@ -370,7 +459,7 @@ func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID,
 		}
 		return JoinResult{}, err
 	}
-	if game.Status == "ended" {
+	if game.Status != "lobby" {
 		return JoinResult{}, ErrConflict
 	}
 	player, err := s.q.UpsertPlayer(ctx, db.UpsertPlayerParams{GameID: game.ID, ClientID: clientID, Nickname: nickname})

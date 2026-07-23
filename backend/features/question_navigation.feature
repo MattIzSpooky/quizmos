@@ -32,11 +32,32 @@ Feature: Reviewing an earlier question
     Then "Alice" should receive a "question.reviewed" message
     And the leaderboard should show "Alice" with score 200
 
-  Scenario: Reviewing the current question is allowed
+  Scenario: Reviewing the current (live) question resumes live play instead of a recap
     Given "Alice" answers "A"
     And the admin advances to the next question
     When the admin reviews question 2
-    Then "Alice" should receive a "question.reviewed" message
+    Then "Alice" should receive a "question.started" message
+
+  Scenario: Switching back to the latest question un-reviews it and continues the game
+    Given "Alice" answers "A"
+    And the admin advances to the next question
+    And the admin reviews question 1
+    And "Alice" should receive a "question.reviewed" message
+    When the admin reviews question 2
+    Then "Alice" should receive a "question.started" message
+    And "Alice" answers "B"
+    And "Alice" should receive an "answer.result" message with correct true and 100 points
 
   Scenario: Reviewing a question that hasn't been asked yet is rejected
     Then reviewing question 2 should fail with status 400
+
+  Scenario: A player who reconnects mid-recap sees the recap, not live play
+    Given "Alice" answers "A"
+    And the admin advances to the next question
+    And "Alice" answers "B"
+    And the admin advances to the next question
+    And the admin reviews question 1
+    And "Alice" should receive a "question.reviewed" message
+    When "Alice" disconnects
+    And "Alice" reconnects to the game websocket
+    Then "Alice" should receive a "question.reviewed" message

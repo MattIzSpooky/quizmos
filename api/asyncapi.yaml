@@ -31,6 +31,8 @@ channels:
         $ref: "#/components/messages/questionEnded"
       questionReviewed:
         $ref: "#/components/messages/questionReviewed"
+      questionAnswersReset:
+        $ref: "#/components/messages/questionAnswersReset"
       answerResult:
         $ref: "#/components/messages/answerResult"
       leaderboardUpdated:
@@ -85,6 +87,12 @@ operations:
       $ref: "#/channels/gameSession"
     messages:
       - $ref: "#/channels/gameSession/messages/questionReviewed"
+  receiveQuestionAnswersReset:
+    action: receive
+    channel:
+      $ref: "#/channels/gameSession"
+    messages:
+      - $ref: "#/channels/gameSession/messages/questionAnswersReset"
   receiveAnswerResult:
     action: receive
     channel:
@@ -146,6 +154,10 @@ components:
       name: question.reviewed
       payload:
         $ref: "#/components/schemas/QuestionReviewed"
+    questionAnswersReset:
+      name: question.answersReset
+      payload:
+        $ref: "#/components/schemas/QuestionAnswersReset"
     answerResult:
       name: answer.result
       payload:
@@ -295,6 +307,19 @@ components:
             $ref: "#/components/schemas/AnswerCount"
         totalQuestions:
           type: integer
+
+    QuestionAnswersReset:
+      type: object
+      required: [questionIndex, questionId]
+      description: >
+        Broadcast after the admin wipes every answer to a question and
+        reverses its points. If this is the question currently live for a
+        client, they should be allowed to answer it again.
+      properties:
+        questionIndex:
+          type: integer
+        questionId:
+          type: string
 
     AnswerResult:
       type: object

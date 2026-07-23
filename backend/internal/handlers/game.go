@@ -134,9 +134,44 @@ func (h *Handlers) ReviewQuestion(ctx context.Context, req api.ReviewQuestionReq
 		return nil, err
 	}
 
-	h.hub.Broadcast(req.GameId, ws.TypeQuestionReviewed, questionReviewedPayload(result.Question, result.Game.TotalQuestions, result.AnswerCounts))
+	if result.IsLive {
+		// Switching back to the actual current question resumes live
+		// play — it may still be open for answers, and question.reviewed
+		// always reveals the correct answer, which would leak it early.
+		h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(
+			result.Question, int(result.Question.Position), result.Game.TotalQuestions, result.Game.QuizTimed,
+		))
+	} else {
+		h.hub.Broadcast(req.GameId, ws.TypeQuestionReviewed, questionReviewedPayload(result.Question, result.Game.TotalQuestions, result.AnswerCounts))
+	}
 
 	return api.ReviewQuestion200JSONResponse(gameToAPI(result.Game)), nil
+}
+
+func (h *Handlers) ResetQuestionAnswers(ctx context.Context, req api.ResetQuestionAnswersRequestObject) (api.ResetQuestionAnswersResponseObject, error) {
+	result, err := h.svc.ResetQuestionAnswers(ctx, req.GameId, req.Body.QuestionIndex)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return api.ResetQuestionAnswers404JSONResponse{NotFoundJSONResponse: notFoundGame()}, nil
+		case errors.Is(err, service.ErrConflict):
+			return api.ResetQuestionAnswers409JSONResponse{ConflictJSONResponse: conflictGame("game is not in progress")}, nil
+		case errors.Is(err, service.ErrValidation):
+			return api.ResetQuestionAnswers400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(apiError("validation_error", "questionIndex must be at or before the current question"))}, nil
+		}
+		return nil, err
+	}
+
+	h.hub.Broadcast(req.GameId, ws.TypeQuestionAnswersReset, ws.QuestionAnswersReset{
+		QuestionIndex: int64(result.Question.Position),
+		QuestionID:    result.Question.ID.String(),
+	})
+	h.hub.Broadcast(req.GameId, ws.TypeLeaderboardUpdated, ws.LeaderboardUpdated{
+		QuestionIndex: int64(result.Question.Position),
+		Entries:       leaderboardEntriesPayload(result.Leaderboard),
+	})
+
+	return api.ResetQuestionAnswers200JSONResponse(gameToAPI(result.Game)), nil
 }
 
 func (h *Handlers) EndGame(ctx context.Context, req api.EndGameRequestObject) (api.EndGameResponseObject, error) {

@@ -198,6 +198,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/games/{gameId}/reset-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wipe every player's answer to one already-asked question and reverse any points it awarded, so it can be answered again. For recovering from a mistake (e.g. the wrong option was marked correct, or the question started before everyone was ready) — not for routine use. Only questions at or before the current one can be reset. */
+        post: operations["resetQuestionAnswers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/games/{gameId}/end": {
         parameters: {
             query?: never;
@@ -265,7 +284,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Join a game by its join code */
+        /** Join a game by its join code. Only allowed while the game is in the lobby — once it's in progress or has ended, this returns 409. */
         post: operations["joinGame"];
         delete?: never;
         options?: never;
@@ -389,6 +408,10 @@ export interface components {
             questionIds: string[];
         };
         ReviewQuestionRequest: {
+            /** @description Must be at or before the game's current question index. */
+            questionIndex: number;
+        };
+        ResetAnswersRequest: {
             /** @description Must be at or before the game's current question index. */
             questionIndex: number;
         };
@@ -944,6 +967,37 @@ export interface operations {
         };
         responses: {
             /** @description Question re-broadcast to players */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGame"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resetQuestionAnswers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetAnswersRequest"];
+            };
+        };
+        responses: {
+            /** @description Answers reset */
             200: {
                 headers: {
                     [name: string]: unknown;

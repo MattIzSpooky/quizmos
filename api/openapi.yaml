@@ -423,6 +423,44 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /admin/games/{gameId}/reset-answers:
+    parameters:
+      - $ref: "#/components/parameters/GameId"
+    post:
+      operationId: resetQuestionAnswers
+      tags: [games]
+      summary: >
+        Wipe every player's answer to one already-asked question and
+        reverse any points it awarded, so it can be answered again. For
+        recovering from a mistake (e.g. the wrong option was marked
+        correct, or the question started before everyone was ready) —
+        not for routine use. Only questions at or before the current one
+        can be reset.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetAnswersRequest"
+      responses:
+        "200":
+          description: Answers reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminGame"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /admin/games/{gameId}/end:
     parameters:
       - $ref: "#/components/parameters/GameId"
@@ -502,7 +540,9 @@ paths:
     post:
       operationId: joinGame
       tags: [players]
-      summary: Join a game by its join code
+      summary: >
+        Join a game by its join code. Only allowed while the game is in
+        the lobby — once it's in progress or has ended, this returns 409.
       parameters:
         - $ref: "#/components/parameters/ClientId"
       requestBody:
@@ -826,6 +866,15 @@ components:
             format: uuid
 
     ReviewQuestionRequest:
+      type: object
+      required: [questionIndex]
+      properties:
+        questionIndex:
+          type: integer
+          minimum: 0
+          description: Must be at or before the game's current question index.
+
+    ResetAnswersRequest:
       type: object
       required: [questionIndex]
       properties:

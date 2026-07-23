@@ -1,4 +1,4 @@
-import { useCallback, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { Route } from "./+types/play.$code";
 import { useGameSocket } from "../lib/ws/useGameSocket";
@@ -43,6 +43,13 @@ function reducer(state: PlayState, action: ServerMessage): PlayState {
       return { phase: "reveal", ended: action.payload, leaderboard: null };
     case "question.reviewed":
       return { phase: "review", review: action.payload };
+    case "question.answersReset":
+      // The admin wiped this question's answers so it can be answered
+      // again — clear our own submitted result too (see the onMessage
+      // handler for clearing the locally-selected option).
+      return state.phase === "question" && state.question.questionId === action.payload.questionId
+        ? { ...state, result: null }
+        : state;
     case "leaderboard.updated":
       return state.phase === "reveal" ? { ...state, leaderboard: action.payload.entries } : state;
     case "game.ended":
@@ -60,11 +67,24 @@ export default function Play({ params }: Route.ComponentProps) {
   // Options carry no text past question.started, so we keep the last seen
   // question around to render option labels during the reveal phase.
   const [lastQuestion, setLastQuestion] = useState<QuestionStarted | null>(null);
+  // onMessage's useCallback deps are intentionally empty (so the socket
+  // never has to reconnect), so it can't close over a fresh `state` — this
+  // ref mirrors it for the one place that needs to read current phase.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const onMessage = useCallback((msg: ServerMessage) => {
     if (msg.type === "question.started") {
       setAnsweredOptionId(null);
       setLastQuestion(msg.payload);
+    }
+    if (msg.type === "question.answersReset") {
+      const current = stateRef.current;
+      if (current.phase === "question" && current.question.questionId === msg.payload.questionId) {
+        setAnsweredOptionId(null);
+      }
     }
     if (msg.type === "player.kicked" || msg.type === "game.ended") {
       // The server closes this connection shortly after either message;
@@ -197,35 +217,49 @@ export default function Play({ params }: Route.ComponentProps) {
         )}
 
         {state.phase === "review" && (
-          <div className="flex w-full flex-col gap-6 motion-safe:animate-[rise-in_0.4s_ease-out_both]">
-            <p className="text-center font-mono text-xs uppercase tracking-[0.2em] text-dim">
+          <div className="flex w-full flex-col gap-5 motion-safe:animate-[rise-in_0.4s_ease-out_both]">
+            <div
+              role="status"
+              className="flex items-center justify-center gap-2 rounded-full border border-ember/40 bg-ember/10 px-4 py-2"
+            >
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 rounded-full bg-ember motion-safe:animate-[twinkle_1.6s_ease-in-out_infinite]"
+              />
+              <span className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-ember">
+                Recap — not live
+              </span>
+            </div>
+            <p className="text-center text-sm text-dim">
               The host is revisiting question {state.review.questionIndex + 1} of{" "}
-              {state.review.totalQuestions} — your answer can't change
+              {state.review.totalQuestions}. Your answer can't change.
             </p>
-            <h1 className="text-center font-display text-xl font-semibold text-paper">
-              {state.review.prompt}
-            </h1>
-            <ul className="flex flex-col gap-2">
-              {state.review.options.map((opt) => {
-                const isCorrect = opt.id === state.review.correctOptionId;
-                const count =
-                  state.review.answerCounts.find((c) => c.optionId === opt.id)?.count ?? 0;
-                return (
-                  <li
-                    key={opt.id}
-                    className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
-                      isCorrect ? "border-starlight bg-starlight/10" : "border-void-3 bg-void-2/60"
-                    }`}
-                  >
-                    <span className={isCorrect ? "text-starlight" : "text-paper"}>
-                      {isCorrect ? "★ " : ""}
-                      {opt.text}
-                    </span>
-                    <span className="font-mono text-xs text-dim">{count}</span>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="rounded-2xl border border-ember/30 bg-void-2/80 p-5 backdrop-blur-sm">
+              <h1 className="text-center font-display text-xl font-semibold text-paper">
+                {state.review.prompt}
+              </h1>
+              <ul className="mt-4 flex flex-col gap-2">
+                {state.review.options.map((opt) => {
+                  const isCorrect = opt.id === state.review.correctOptionId;
+                  const count =
+                    state.review.answerCounts.find((c) => c.optionId === opt.id)?.count ?? 0;
+                  return (
+                    <li
+                      key={opt.id}
+                      className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+                        isCorrect ? "border-starlight bg-starlight/10" : "border-void-3 bg-void-2/60"
+                      }`}
+                    >
+                      <span className={isCorrect ? "text-starlight" : "text-paper"}>
+                        {isCorrect ? "★ " : ""}
+                        {opt.text}
+                      </span>
+                      <span className="font-mono text-xs text-dim">{count}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           </div>
         )}
 

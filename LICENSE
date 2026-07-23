@@ -1,0 +1,41 @@
+MIT License (with AI/ML Training Restriction)
+
+Copyright (c) 2026 MattIzSpooky
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+ADDITIONAL RESTRICTION - NO USE FOR AI/ML TRAINING:
+
+Notwithstanding the permissions granted above, no part of the Software or
+of this repository (including but not limited to source code, comments,
+documentation, commit history, issues, and pull requests) may be used,
+copied, or processed for the purpose of training, fine-tuning, evaluating,
+or otherwise developing any machine learning or artificial intelligence
+model, including large language models, code-generation models, and any
+derivative or successor technologies. This restriction applies regardless
+of whether the resulting model is offered commercially or free of charge.
+
+This restriction constitutes an explicit reservation of rights for the
+purposes of text and data mining exceptions, including but not limited to
+Article 4 of Directive (EU) 2019/790 and equivalent provisions in other
+jurisdictions.
+
+Because of this additional restriction, this license does not meet the Open
+Source Definition and the Software should not be described as "open
+source"; it is source-available under the terms above.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

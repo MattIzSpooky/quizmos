@@ -37,6 +37,9 @@
 //    presencePlayerLeft, err := UnmarshalPresencePlayerLeft(bytes)
 //    bytes, err = presencePlayerLeft.Marshal()
 //
+//    questionAnswersReset, err := UnmarshalQuestionAnswersReset(bytes)
+//    bytes, err = questionAnswersReset.Marshal()
+//
 //    questionEnded, err := UnmarshalQuestionEnded(bytes)
 //    bytes, err = questionEnded.Marshal()
 //
@@ -175,6 +178,16 @@ func (r *PresencePlayerLeft) Marshal() ([]byte, error) {
 	return json.Marshal(r)
 }
 
+func UnmarshalQuestionAnswersReset(data []byte) (QuestionAnswersReset, error) {
+	var r QuestionAnswersReset
+	err := json.Unmarshal(data, &r)
+	return r, err
+}
+
+func (r *QuestionAnswersReset) Marshal() ([]byte, error) {
+	return json.Marshal(r)
+}
+
 func UnmarshalQuestionEnded(data []byte) (QuestionEnded, error) {
 	var r QuestionEnded
 	err := json.Unmarshal(data, &r)
@@ -272,6 +285,14 @@ type PlayerSummary struct {
 type PresencePlayerLeft struct {
 	ClientID    string `json:"clientId"`
 	PlayerCount int64  `json:"playerCount"`
+}
+
+// Broadcast after the admin wipes every answer to a question and reverses its points. If
+// this is the question currently live for a client, they should be allowed to answer it
+// again.
+type QuestionAnswersReset struct {
+	QuestionID    string `json:"questionId"`
+	QuestionIndex int64  `json:"questionIndex"`
 }
 
 type QuestionEnded struct {

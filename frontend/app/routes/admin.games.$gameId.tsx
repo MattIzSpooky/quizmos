@@ -5,6 +5,7 @@ import { useRequireAdmin } from "../lib/auth/useRequireAdmin";
 import type { components } from "../lib/api/schema.gen";
 import { AdminHeader } from "../components/AdminHeader";
 import { Constellation } from "../components/Constellation";
+import { QrCode } from "../components/QrCode";
 import { Button, Panel } from "../components/ui";
 
 type AdminGameDetail = components["schemas"]["AdminGameDetail"];
@@ -26,6 +27,12 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
   const [game, setGame] = useState<AdminGameDetail | null>(null);
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  // Reviewing a question is a pure broadcast — it never moves the game's
+  // actual current-question pointer (see backend ReviewQuestion) — so the
+  // admin's own view has to track "what's on screen right now" separately
+  // from `game.currentQuestionIndex`. null means "follow live play".
+  const [viewedIndex, setViewedIndex] = useState<number | null>(null);
   // A ref (not just the `busy` state) guards against a double-click
   // landing before React has re-rendered the disabled button: the ref is
   // checked synchronously, so the second click is dropped even within
@@ -66,12 +73,14 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
       .then(({ data }) => data && setQuestions(data.questions));
   }, [game?.quizId, questions]);
 
-  const currentQuestion =
-    game?.currentQuestionIndex != null ? questions?.[game.currentQuestionIndex] : undefined;
+  const displayedIndex = viewedIndex ?? game?.currentQuestionIndex ?? 0;
+  const displayedQuestion = questions?.[displayedIndex];
+  const isReviewing = viewedIndex != null && viewedIndex !== game?.currentQuestionIndex;
 
   async function start() {
     await withLock(async () => {
       await adminApi.POST("/admin/games/{gameId}/start", { params: { path: { gameId } } });
+      setViewedIndex(null);
       await load();
     });
   }
@@ -79,6 +88,7 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
   async function nextQuestion() {
     await withLock(async () => {
       await adminApi.POST("/admin/games/{gameId}/next-question", { params: { path: { gameId } } });
+      setViewedIndex(null); // follow live play again, not whatever was last reviewed
       await load();
     });
   }
@@ -89,6 +99,18 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
         params: { path: { gameId } },
         body: { questionIndex: index },
       });
+      setViewedIndex(index);
+    });
+  }
+
+  async function resetAnswers(index: number, prompt: string) {
+    if (!window.confirm(`Wipe every player's answer to "${prompt}"? This can't be undone.`)) return;
+    await withLock(async () => {
+      await adminApi.POST("/admin/games/{gameId}/reset-answers", {
+        params: { path: { gameId } },
+        body: { questionIndex: index },
+      });
+      await load();
     });
   }
 
@@ -134,27 +156,30 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
               {STATUS_LABEL[game.status] ?? game.status}
             </p>
           </div>
-          <div className="text-center sm:text-right">
-            <p className="font-mono text-[0.65rem] uppercase tracking-[0.2em] text-dim">
-              Join code
-            </p>
-            <p className="font-mono text-3xl tracking-[0.3em] text-starlight">{game.code}</p>
-          </div>
+          {game.status !== "lobby" && (
+            <div className="text-center sm:text-right">
+              <p className="font-mono text-[0.65rem] uppercase tracking-[0.2em] text-dim">
+                Join code
+              </p>
+              <p className="font-mono text-2xl tracking-[0.3em] text-starlight">{game.code}</p>
+            </div>
+          )}
         </div>
 
         {game.status === "in_progress" && (
           <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="font-mono text-xs uppercase tracking-[0.2em] text-dim">
-                Question {(game.currentQuestionIndex ?? 0) + 1} of {game.totalQuestions}
+                Question {displayedIndex + 1} of {game.totalQuestions}
+                {isReviewing && <span className="text-ember"> · reviewing</span>}
               </p>
-              {currentQuestion ? (
+              {displayedQuestion ? (
                 <>
                   <p className="mt-1 truncate font-display text-lg text-paper">
-                    {currentQuestion.prompt}
+                    {displayedQuestion.prompt}
                   </p>
                   <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    {currentQuestion.options.map((opt) => (
+                    {displayedQuestion.options.map((opt) => (
                       <li
                         key={opt.id}
                         className={`text-sm ${opt.isCorrect ? "text-starlight" : "text-dim"}`}
@@ -172,15 +197,25 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
             <div className="flex shrink-0 flex-wrap gap-3">
               <Button
                 variant="ghost"
-                disabled={busy || (game.currentQuestionIndex ?? 0) === 0}
-                onClick={() => reviewQuestion((game.currentQuestionIndex ?? 0) - 1)}
-                title="Show this question's predecessor again to players, read-only"
+                disabled={busy || displayedIndex === 0}
+                onClick={() => reviewQuestion(displayedIndex - 1)}
+                title="Show the previous question again to players, read-only"
               >
                 ← Previous
               </Button>
-              <Button disabled={busy} onClick={nextQuestion}>
-                Next question
-              </Button>
+              {isReviewing ? (
+                <Button
+                  disabled={busy}
+                  onClick={() => reviewQuestion(game.currentQuestionIndex ?? 0)}
+                  title="Return to the live question and continue the game"
+                >
+                  Resume
+                </Button>
+              ) : (
+                <Button disabled={busy} onClick={nextQuestion}>
+                  Next question
+                </Button>
+              )}
               <Button variant="danger" disabled={busy} onClick={endGame}>
                 End game
               </Button>
@@ -188,15 +223,39 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
           </div>
         )}
 
-        {game.status === "lobby" && (
-          <div className="mt-6">
+        {game.status === "ended" && <p className="mt-6 text-sm text-dim">This game has ended.</p>}
+      </Panel>
+
+      {game.status === "lobby" && (
+        <Panel className="mt-6 p-6 sm:p-8">
+          <div className="flex flex-col items-center gap-8 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-center sm:text-left">
+              <p className="font-mono text-xs uppercase tracking-[0.2em] text-dim">
+                Invite players
+              </p>
+              <p className="mt-2 font-mono text-4xl tracking-[0.4em] text-starlight">{game.code}</p>
+              <p className="mt-3 text-sm text-dim">
+                Share the code, or scan the QR code to join instantly.
+              </p>
+              <button
+                onClick={() => setShowQr((v) => !v)}
+                className="mt-3 font-mono text-xs text-dim underline decoration-void-3 underline-offset-4 hover:text-aurora"
+              >
+                {showQr ? "Hide QR code" : "Show QR code"}
+              </button>
+            </div>
+            {showQr && (
+              <QrCode value={`${window.location.origin}/?code=${game.code}`} size={168} />
+            )}
+          </div>
+
+          <div className="mt-8">
             <Button disabled={busy} onClick={start}>
               Start game
             </Button>
           </div>
-        )}
-        {game.status === "ended" && <p className="mt-6 text-sm text-dim">This game has ended.</p>}
-      </Panel>
+        </Panel>
+      )}
 
       {game.status === "in_progress" && questions && (
         <section className="mt-8">
@@ -205,23 +264,38 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
           </h2>
           <Panel className="flex flex-col divide-y divide-void-3">
             {questions.map((q, i) => {
-              const isCurrent = i === (game.currentQuestionIndex ?? -1);
+              const isCurrent = i === displayedIndex;
               const isReachable = i <= (game.currentQuestionIndex ?? -1);
               return (
-                <button
+                <div
                   key={q.id}
-                  type="button"
-                  disabled={busy || !isReachable}
-                  onClick={() => reviewQuestion(i)}
-                  className={`flex items-center gap-3 px-4 py-3 text-left transition first:rounded-t-2xl last:rounded-b-2xl disabled:cursor-not-allowed ${
-                    isCurrent ? "bg-starlight/10" : isReachable ? "hover:bg-void-3/50" : "opacity-40"
+                  className={`flex items-center gap-3 px-4 py-3 transition first:rounded-t-2xl last:rounded-b-2xl ${
+                    isCurrent ? "bg-starlight/10" : ""
                   }`}
                 >
-                  <span className="w-6 shrink-0 font-mono text-xs text-dim">{i + 1}</span>
-                  <span className={`truncate ${isCurrent ? "text-starlight" : "text-paper"}`}>
-                    {q.prompt}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    disabled={busy || !isReachable}
+                    onClick={() => reviewQuestion(i)}
+                    className={`flex min-w-0 flex-1 items-center gap-3 text-left transition disabled:cursor-not-allowed ${
+                      isReachable ? "hover:opacity-80" : "opacity-40"
+                    }`}
+                  >
+                    <span className="w-6 shrink-0 font-mono text-xs text-dim">{i + 1}</span>
+                    <span className={`truncate ${isCurrent ? "text-starlight" : "text-paper"}`}>
+                      {q.prompt}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !isReachable}
+                    onClick={() => resetAnswers(i, q.prompt)}
+                    title="Wipe every player's answer to this question so it can be answered again"
+                    className="shrink-0 font-mono text-xs text-flare/80 underline decoration-flare/30 underline-offset-4 hover:text-flare disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Reset answers
+                  </button>
+                </div>
               );
             })}
           </Panel>

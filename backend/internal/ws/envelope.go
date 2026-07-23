@@ -19,6 +19,7 @@ const (
 	TypeQuestionStarted      = "question.started"
 	TypeQuestionEnded        = "question.ended"
 	TypeQuestionReviewed     = "question.reviewed"
+	TypeQuestionAnswersReset = "question.answersReset"
 	TypeAnswerResult         = "answer.result"
 	TypeLeaderboardUpdated   = "leaderboard.updated"
 	TypeGameEnded            = "game.ended"

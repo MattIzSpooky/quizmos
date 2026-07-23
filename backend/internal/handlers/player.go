@@ -15,7 +15,7 @@ func (h *Handlers) JoinGame(ctx context.Context, req api.JoinGameRequestObject) 
 		case errors.Is(err, service.ErrNotFound):
 			return api.JoinGame404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(apiError("not_found", "no game with that code"))}, nil
 		case errors.Is(err, service.ErrConflict):
-			return api.JoinGame409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(apiError("conflict", "game has already ended"))}, nil
+			return api.JoinGame409JSONResponse{ConflictJSONResponse: api.ConflictJSONResponse(apiError("conflict", "this game is no longer open to new players"))}, nil
 		}
 		return nil, err
 	}

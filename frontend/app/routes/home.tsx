@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import type { Route } from "./+types/home";
 import { publicApi } from "../lib/api/client";
 import { getClientId } from "../lib/client-id";
@@ -14,7 +14,11 @@ export function meta({}: Route.MetaArgs) {
 
 export default function Home() {
   const navigate = useNavigate();
-  const [code, setCode] = useState("");
+  // Scanning the join code's QR code lands here as /?code=XXXXXX — pick
+  // that up so the player only has to type their nickname.
+  const [searchParams] = useSearchParams();
+  const prefilledCode = (searchParams.get("code") ?? "").toUpperCase();
+  const [code, setCode] = useState(prefilledCode);
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -29,7 +33,7 @@ export default function Home() {
     });
     setSubmitting(false);
     if (apiError || !data) {
-      setError("No game found at that code. Check it and try again.");
+      setError(apiError?.message ?? "No game found at that code. Check it and try again.");
       return;
     }
     navigate(`/play/${data.code}`);
@@ -73,6 +77,7 @@ export default function Home() {
                 placeholder="How should we call you?"
                 value={nickname}
                 maxLength={32}
+                autoFocus={!!prefilledCode}
                 onChange={(e) => setNickname(e.target.value)}
                 required
               />

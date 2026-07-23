@@ -81,6 +81,20 @@ func (q *Queries) CreateAnswer(ctx context.Context, arg CreateAnswerParams) (Ans
 	return i, err
 }
 
+const deleteAnswersForQuestion = `-- name: DeleteAnswersForQuestion :exec
+DELETE FROM answers WHERE game_id = $1 AND question_id = $2
+`
+
+type DeleteAnswersForQuestionParams struct {
+	GameID     uuid.UUID `json:"game_id"`
+	QuestionID uuid.UUID `json:"question_id"`
+}
+
+func (q *Queries) DeleteAnswersForQuestion(ctx context.Context, arg DeleteAnswersForQuestionParams) error {
+	_, err := q.db.Exec(ctx, deleteAnswersForQuestion, arg.GameID, arg.QuestionID)
+	return err
+}
+
 const getAnswer = `-- name: GetAnswer :one
 SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at FROM answers WHERE question_id = $1 AND player_id = $2
 `
@@ -104,4 +118,42 @@ func (q *Queries) GetAnswer(ctx context.Context, arg GetAnswerParams) (Answer, e
 		&i.AnsweredAt,
 	)
 	return i, err
+}
+
+const getAnswersForQuestion = `-- name: GetAnswersForQuestion :many
+SELECT id, game_id, question_id, player_id, selected_option_id, is_correct, points_awarded, answered_at FROM answers WHERE game_id = $1 AND question_id = $2
+`
+
+type GetAnswersForQuestionParams struct {
+	GameID     uuid.UUID `json:"game_id"`
+	QuestionID uuid.UUID `json:"question_id"`
+}
+
+func (q *Queries) GetAnswersForQuestion(ctx context.Context, arg GetAnswersForQuestionParams) ([]Answer, error) {
+	rows, err := q.db.Query(ctx, getAnswersForQuestion, arg.GameID, arg.QuestionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Answer
+	for rows.Next() {
+		var i Answer
+		if err := rows.Scan(
+			&i.ID,
+			&i.GameID,
+			&i.QuestionID,
+			&i.PlayerID,
+			&i.SelectedOptionID,
+			&i.IsCorrect,
+			&i.PointsAwarded,
+			&i.AnsweredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
