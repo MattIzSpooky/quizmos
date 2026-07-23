@@ -10,6 +10,7 @@ import type {
   QuestionReviewed,
   QuestionStarted,
 } from "../lib/ws/types.gen";
+import { AudioPlayer } from "../components/AudioPlayer";
 import { Constellation } from "../components/Constellation";
 import { OrbitTimer } from "../components/OrbitTimer";
 import { Button, Panel } from "../components/ui";
@@ -31,7 +32,7 @@ function QuestionMedia({ mediaUrl, mediaType }: { mediaUrl?: string; mediaType?:
       />
     );
   }
-  return <audio controls src={mediaUrl} className="w-full" />;
+  return <AudioPlayer src={mediaUrl} className="w-full" />;
 }
 
 type PlayState =

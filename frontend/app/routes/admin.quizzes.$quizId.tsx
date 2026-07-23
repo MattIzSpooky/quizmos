@@ -5,6 +5,7 @@ import { adminApi } from "../lib/api/client";
 import { useRequireAdmin } from "../lib/auth/useRequireAdmin";
 import type { components } from "../lib/api/schema.gen";
 import { AdminHeader } from "../components/AdminHeader";
+import { AudioPlayer } from "../components/AudioPlayer";
 import { Button, Field, Panel, StarToggle, Toggle } from "../components/ui";
 
 type QuizDetail = components["schemas"]["QuizDetail"];
@@ -247,7 +248,7 @@ export default function AdminQuizDetail({ params }: Route.ComponentProps) {
                         className="max-h-40 rounded-lg border border-void-3 object-contain"
                       />
                     ) : (
-                      <audio controls src={q.mediaUrl} className="w-full" />
+                      <AudioPlayer src={q.mediaUrl} className="w-full" />
                     )}
                     <button
                       type="button"
