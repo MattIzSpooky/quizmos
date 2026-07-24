@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +17,9 @@ type QuizWithCount struct {
 }
 
 func (s *Service) CreateQuiz(ctx context.Context, createdBy, title, description string, timed bool) (QuizWithCount, error) {
+	ctx, span := tracer.Start(ctx, "service.CreateQuiz")
+	defer span.End()
+
 	q, err := s.q.CreateQuiz(ctx, db.CreateQuizParams{Title: title, Description: description, CreatedBy: createdBy, Timed: timed})
 	if err != nil {
 		return QuizWithCount{}, err
@@ -25,6 +28,9 @@ func (s *Service) CreateQuiz(ctx context.Context, createdBy, title, description 
 }
 
 func (s *Service) ListQuizzes(ctx context.Context) ([]QuizWithCount, error) {
+	ctx, span := tracer.Start(ctx, "service.ListQuizzes")
+	defer span.End()
+
 	quizzes, err := s.q.ListQuizzes(ctx)
 	if err != nil {
 		return nil, err
@@ -41,6 +47,9 @@ func (s *Service) ListQuizzes(ctx context.Context) ([]QuizWithCount, error) {
 }
 
 func (s *Service) GetQuiz(ctx context.Context, id uuid.UUID) (QuizWithCount, error) {
+	ctx, span := tracer.Start(ctx, "service.GetQuiz")
+	defer span.End()
+
 	q, err := s.q.GetQuiz(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -56,6 +65,9 @@ func (s *Service) GetQuiz(ctx context.Context, id uuid.UUID) (QuizWithCount, err
 }
 
 func (s *Service) GetQuizDetail(ctx context.Context, id uuid.UUID) (QuizWithCount, []QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.GetQuizDetail")
+	defer span.End()
+
 	quiz, err := s.GetQuiz(ctx, id)
 	if err != nil {
 		return QuizWithCount{}, nil, err
@@ -68,6 +80,9 @@ func (s *Service) GetQuizDetail(ctx context.Context, id uuid.UUID) (QuizWithCoun
 }
 
 func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, description *string, timed *bool) (QuizWithCount, error) {
+	ctx, span := tracer.Start(ctx, "service.UpdateQuiz")
+	defer span.End()
+
 	params := db.UpdateQuizParams{
 		ID:          id,
 		Title:       textParam(title),
@@ -101,6 +116,9 @@ func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, descripti
 // alone holds the websocket hub) to close out any live connections still
 // pointing at a game that no longer exists.
 func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	ctx, span := tracer.Start(ctx, "service.DeleteQuiz")
+	defer span.End()
+
 	questions, err := s.q.ListQuestionsByQuiz(ctx, id)
 	if err != nil {
 		return nil, err
@@ -123,7 +141,7 @@ func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, er
 			continue
 		}
 		if err := s.store.Delete(ctx, q.MediaKey.String); err != nil {
-			log.Printf("service: delete media %q after deleting quiz %s: %v", q.MediaKey.String, id, err)
+			slog.ErrorContext(ctx, "service.delete_media_failed", "media_key", q.MediaKey.String, "quiz.id", id, "error", err)
 		}
 	}
 

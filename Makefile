@@ -19,7 +19,7 @@ help:
 	@echo "  make migrate-up         apply database migrations"
 	@echo "  make migrate-down       roll back the last migration"
 	@echo "  make migrate-new name=add_foo   scaffold a new migration pair"
-	@echo "  make dev-up / dev-down  start/stop local Postgres + Keycloak + MinIO, for native go run/npm run dev"
+	@echo "  make dev-up / dev-down  start/stop local Postgres + Keycloak + MinIO + Grafana LGTM, for native go run/npm run dev"
 	@echo "  make run-backend        run the Go backend"
 	@echo "  make run-frontend       run the React dev server"
 	@echo "  make build              build backend binary + frontend production bundle"
@@ -101,11 +101,11 @@ migrate-new:
 
 .PHONY: dev-up
 dev-up:
-	docker compose up -d postgres keycloak minio
+	docker compose up -d postgres keycloak minio lgtm
 
 .PHONY: dev-down
 dev-down:
-	docker compose stop postgres keycloak minio
+	docker compose stop postgres keycloak minio lgtm
 
 .PHONY: demo-up
 demo-up:

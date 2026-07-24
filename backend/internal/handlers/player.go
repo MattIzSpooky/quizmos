@@ -23,6 +23,8 @@ func (h *Handlers) JoinGame(ctx context.Context, req api.JoinGameRequestObject) 
 		}
 		return nil, err
 	}
+	logGameAction(ctx, "game.player_joined", result.Game.ID, actorPlayer, req.Params.XClientId.String(),
+		"nickname", result.Player.Nickname)
 	return api.JoinGame200JSONResponse{
 		GameId:   result.Game.ID,
 		Code:     result.Game.Code,
@@ -42,6 +44,8 @@ func (h *Handlers) KickPlayer(ctx context.Context, req api.KickPlayerRequestObje
 		}
 		return nil, err
 	}
+	logGameAction(ctx, "game.player_kicked", req.GameId, actorAdmin, adminActor(ctx),
+		"target.client_id", req.ClientId)
 	h.hub.Kick(req.GameId, req.ClientId, "Removed by the host")
 	return api.KickPlayer204Response{}, nil
 }

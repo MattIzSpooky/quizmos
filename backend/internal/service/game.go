@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 )
@@ -65,6 +67,9 @@ func (s *Service) summarize(ctx context.Context, game db.Game) (GameSummary, err
 }
 
 func (s *Service) CreateGame(ctx context.Context, createdBy string, quizID uuid.UUID) (GameSummary, error) {
+	ctx, span := tracer.Start(ctx, "service.CreateGame")
+	defer span.End()
+
 	count, err := s.q.CountQuizQuestions(ctx, quizID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -90,10 +95,18 @@ func (s *Service) CreateGame(ctx context.Context, createdBy string, quizID uuid.
 	if err != nil {
 		return GameSummary{}, err
 	}
-	return s.summarize(ctx, game)
+	summary, err := s.summarize(ctx, game)
+	if err != nil {
+		return GameSummary{}, err
+	}
+	gamesCreated.Add(ctx, 1)
+	return summary, nil
 }
 
 func (s *Service) ListGames(ctx context.Context, status *string) ([]GameSummary, error) {
+	ctx, span := tracer.Start(ctx, "service.ListGames")
+	defer span.End()
+
 	games, err := s.q.ListGames(ctx, textParam(status))
 	if err != nil {
 		return nil, err
@@ -110,6 +123,9 @@ func (s *Service) ListGames(ctx context.Context, status *string) ([]GameSummary,
 }
 
 func (s *Service) GetGameDetail(ctx context.Context, id uuid.UUID) (GameDetail, error) {
+	ctx, span := tracer.Start(ctx, "service.GetGameDetail")
+	defer span.End()
+
 	game, err := s.q.GetGame(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -131,6 +147,9 @@ func (s *Service) GetGameDetail(ctx context.Context, id uuid.UUID) (GameDetail, 
 // QuestionAtIndex returns the question at the given 0-based position in the
 // game's quiz, along with the quiz's total question count.
 func (s *Service) QuestionAtIndex(ctx context.Context, quizID uuid.UUID, index int) (QuestionWithOptions, int, error) {
+	ctx, span := tracer.Start(ctx, "service.QuestionAtIndex")
+	defer span.End()
+
 	questions, err := s.ListQuestions(ctx, quizID)
 	if err != nil {
 		return QuestionWithOptions{}, 0, err
@@ -142,6 +161,9 @@ func (s *Service) QuestionAtIndex(ctx context.Context, quizID uuid.UUID, index i
 }
 
 func (s *Service) StartGame(ctx context.Context, id uuid.UUID) (GameSummary, error) {
+	ctx, span := tracer.Start(ctx, "service.StartGame")
+	defer span.End()
+
 	game, err := s.q.StartGame(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -149,7 +171,12 @@ func (s *Service) StartGame(ctx context.Context, id uuid.UUID) (GameSummary, err
 		}
 		return GameSummary{}, err
 	}
-	return s.summarize(ctx, game)
+	summary, err := s.summarize(ctx, game)
+	if err != nil {
+		return GameSummary{}, err
+	}
+	gamesStarted.Add(ctx, 1)
+	return summary, nil
 }
 
 // AdvanceResult describes the outcome of ending the current question and
@@ -166,6 +193,9 @@ type AdvanceResult struct {
 }
 
 func (s *Service) AdvanceGame(ctx context.Context, id uuid.UUID) (AdvanceResult, error) {
+	ctx, span := tracer.Start(ctx, "service.AdvanceGame")
+	defer span.End()
+
 	game, err := s.q.GetGame(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -206,6 +236,7 @@ func (s *Service) AdvanceGame(ctx context.Context, id uuid.UUID) (AdvanceResult,
 		result.Game = summary
 		result.Ended = true
 		result.FinalLeaderboard = leaderboard
+		gamesEnded.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "completed")))
 		return result, nil
 	}
 
@@ -250,6 +281,9 @@ type ReviewResult struct {
 // the game's current question — reviewing ahead isn't supported, since
 // that question hasn't been asked (or scored) yet.
 func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex int) (ReviewResult, error) {
+	ctx, span := tracer.Start(ctx, "service.ReviewQuestion")
+	defer span.End()
+
 	game, err := s.q.GetGame(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -300,6 +334,9 @@ type ResetAnswersResult struct {
 // ReviewQuestion, this does mutate state. Only questions at or before the
 // game's current one can be reset, matching ReviewQuestion's rule.
 func (s *Service) ResetQuestionAnswers(ctx context.Context, id uuid.UUID, targetIndex int) (ResetAnswersResult, error) {
+	ctx, span := tracer.Start(ctx, "service.ResetQuestionAnswers")
+	defer span.End()
+
 	game, err := s.q.GetGame(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -360,6 +397,9 @@ type EndGameResult struct {
 }
 
 func (s *Service) EndGame(ctx context.Context, id uuid.UUID) (EndGameResult, error) {
+	ctx, span := tracer.Start(ctx, "service.EndGame")
+	defer span.End()
+
 	game, err := s.q.EndGame(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -375,6 +415,7 @@ func (s *Service) EndGame(ctx context.Context, id uuid.UUID) (EndGameResult, err
 	if err != nil {
 		return EndGameResult{}, err
 	}
+	gamesEnded.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "force_ended")))
 	return EndGameResult{Game: summary, FinalLeaderboard: leaderboard}, nil
 }
 
@@ -396,6 +437,9 @@ func (s *Service) answerCounts(ctx context.Context, questionID uuid.UUID) (map[u
 }
 
 func (s *Service) Leaderboard(ctx context.Context, gameID uuid.UUID) ([]LeaderboardEntry, error) {
+	ctx, span := tracer.Start(ctx, "service.Leaderboard")
+	defer span.End()
+
 	rows, err := s.q.LeaderboardByGame(ctx, gameID)
 	if err != nil {
 		return nil, err
@@ -417,6 +461,9 @@ type PublicGame struct {
 // GetGameByCode returns the raw game row for a join code, without
 // requiring or creating a player.
 func (s *Service) GetGameByCode(ctx context.Context, code string) (db.Game, error) {
+	ctx, span := tracer.Start(ctx, "service.GetGameByCode")
+	defer span.End()
+
 	game, err := s.q.GetGameByCode(ctx, code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -428,6 +475,9 @@ func (s *Service) GetGameByCode(ctx context.Context, code string) (db.Game, erro
 }
 
 func (s *Service) GetPublicGame(ctx context.Context, code string) (PublicGame, error) {
+	ctx, span := tracer.Start(ctx, "service.GetPublicGame")
+	defer span.End()
+
 	game, err := s.q.GetGameByCode(ctx, code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -459,6 +509,9 @@ type JoinResult struct {
 // go through this path: it's a websocket concern against a player row
 // that already exists, not a fresh join.
 func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID, nickname, color string) (JoinResult, error) {
+	ctx, span := tracer.Start(ctx, "service.JoinGame")
+	defer span.End()
+
 	game, err := s.q.GetGameByCode(ctx, code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -475,6 +528,7 @@ func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID,
 	if err != nil {
 		return JoinResult{}, err
 	}
+	playersJoined.Add(ctx, 1)
 	return JoinResult{Game: game, Player: player}, nil
 }
 
@@ -483,6 +537,9 @@ func (s *Service) JoinGame(ctx context.Context, code string, clientID uuid.UUID,
 // scoring — and it's not a ban: nothing stops the same client_id from
 // joining again afterward, same as anyone else.
 func (s *Service) KickPlayer(ctx context.Context, gameID, clientID uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "service.KickPlayer")
+	defer span.End()
+
 	game, err := s.q.GetGame(ctx, gameID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -500,6 +557,7 @@ func (s *Service) KickPlayer(ctx context.Context, gameID, clientID uuid.UUID) er
 	if n == 0 {
 		return ErrNotFound
 	}
+	playersKicked.Add(ctx, 1)
 	return nil
 }
 
@@ -507,6 +565,9 @@ func (s *Service) KickPlayer(ctx context.Context, gameID, clientID uuid.UUID) er
 // creating one — used to authorize a websocket connection, which must
 // never create player identity itself.
 func (s *Service) GetPlayerByCode(ctx context.Context, code string, clientID uuid.UUID) (db.Game, db.Player, error) {
+	ctx, span := tracer.Start(ctx, "service.GetPlayerByCode")
+	defer span.End()
+
 	game, err := s.q.GetGameByCode(ctx, code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -545,6 +606,9 @@ const MaxFreeTextAnswerLength = 500
 // type (multiple_choice or free_text respectively) — anything else is
 // ErrValidation.
 func (s *Service) SubmitAnswer(ctx context.Context, gameID uuid.UUID, clientID, questionID uuid.UUID, optionID *uuid.UUID, text *string) (AnswerResult, error) {
+	ctx, span := tracer.Start(ctx, "service.SubmitAnswer")
+	defer span.End()
+
 	game, err := s.q.GetGame(ctx, gameID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -634,7 +698,22 @@ func (s *Service) SubmitAnswer(ctx context.Context, gameID uuid.UUID, clientID, 
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return AnswerResult{}, err
+	}
+
+	outcome := "incorrect"
+	switch {
+	case result.Pending:
+		outcome = "pending"
+	case result.Correct:
+		outcome = "correct"
+	}
+	answersSubmitted.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("question_type", currentQuestion.Type),
+		attribute.String("outcome", outcome),
+	))
+	return result, nil
 }
 
 // GradedAnswer describes the outcome of manually grading a free-text
@@ -655,6 +734,9 @@ type GradedAnswer struct {
 // adjusted by the difference from whatever was previously awarded, not
 // simply added to again.
 func (s *Service) GradeAnswer(ctx context.Context, gameID, answerID uuid.UUID, correct bool) (GradedAnswer, error) {
+	ctx, span := tracer.Start(ctx, "service.GradeAnswer")
+	defer span.End()
+
 	answer, err := s.q.GetAnswerByID(ctx, answerID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -701,6 +783,12 @@ func (s *Service) GradeAnswer(ctx context.Context, gameID, answerID uuid.UUID, c
 		return GradedAnswer{}, err
 	}
 
+	outcome := "incorrect"
+	if correct {
+		outcome = "correct"
+	}
+	answersGraded.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+
 	return GradedAnswer{
 		ClientID:      player.ClientID,
 		QuestionID:    answer.QuestionID,
@@ -726,6 +814,9 @@ type FreeTextAnswer struct {
 // ListFreeTextAnswers returns every free-text answer submitted so far for
 // one question in this game, oldest first, for the admin to grade.
 func (s *Service) ListFreeTextAnswers(ctx context.Context, gameID, questionID uuid.UUID) ([]FreeTextAnswer, error) {
+	ctx, span := tracer.Start(ctx, "service.ListFreeTextAnswers")
+	defer span.End()
+
 	rows, err := s.q.ListFreeTextAnswersForQuestion(ctx, db.ListFreeTextAnswersForQuestionParams{
 		GameID: gameID, QuestionID: questionID,
 	})
@@ -772,6 +863,9 @@ type PlayerAnswerStatus struct {
 // (Answered: false) rather than an error — the caller treats both the
 // same way.
 func (s *Service) GetPlayerAnswerStatus(ctx context.Context, gameID, clientID, questionID uuid.UUID) (PlayerAnswerStatus, error) {
+	ctx, span := tracer.Start(ctx, "service.GetPlayerAnswerStatus")
+	defer span.End()
+
 	player, err := s.q.GetPlayer(ctx, db.GetPlayerParams{GameID: gameID, ClientID: clientID})
 	if err != nil {
 		if err == pgx.ErrNoRows {

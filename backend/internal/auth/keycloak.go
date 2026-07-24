@@ -23,7 +23,12 @@ const claimsContextKey contextKey = "quizmos.admin.claims"
 // AdminClaims is the subset of the access token we care about.
 type AdminClaims struct {
 	Subject string
-	Roles   []string
+	// Username is the token's preferred_username claim — a human-readable
+	// identifier (e.g. "alice@quizmos.dev"), unlike Subject, which is an
+	// opaque Keycloak user ID. It's what distinguishes one admin from
+	// another in logs (see DisplayName) now that there's more than one.
+	Username string
+	Roles    []string
 }
 
 func (c AdminClaims) HasRole(role string) bool {
@@ -33,6 +38,17 @@ func (c AdminClaims) HasRole(role string) bool {
 		}
 	}
 	return false
+}
+
+// DisplayName returns a human-readable identifier for the admin, for
+// logging — their Keycloak username, falling back to the raw subject on
+// the off chance a token lacks preferred_username (e.g. a client not
+// granted the standard "profile" scope).
+func (c AdminClaims) DisplayName() string {
+	if c.Username != "" {
+		return c.Username
+	}
+	return c.Subject
 }
 
 // ClaimsFromContext returns the authenticated admin's claims, if any.
@@ -124,8 +140,11 @@ func (k *Keycloak) Verify(token string) (AdminClaims, error) {
 	var ra realmAccess
 	_ = parsed.Get("realm_access", &ra) // absent for tokens with no realm roles
 
+	var username string
+	_ = parsed.Get("preferred_username", &username) // absent if the client doesn't request the "profile" scope
+
 	sub, _ := parsed.Subject()
-	return AdminClaims{Subject: sub, Roles: ra.Roles}, nil
+	return AdminClaims{Subject: sub, Username: username, Roles: ra.Roles}, nil
 }
 
 // RequireAdminToken validates a raw "Authorization" header value ("Bearer

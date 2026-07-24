@@ -24,6 +24,11 @@ type Config struct {
 	S3Bucket    string
 	S3UseSSL    bool
 	S3PublicURL string
+
+	// OTelExporterEndpoint is the OTLP/gRPC collector address (host:port,
+	// no scheme) traces and logs are exported to. See internal/telemetry.
+	OTelExporterEndpoint string
+	OTelServiceVersion   string
 }
 
 func Load() (Config, error) {
@@ -43,6 +48,9 @@ func Load() (Config, error) {
 		S3Bucket:       getEnv("S3_BUCKET", "quizmos-media"),
 		S3UseSSL:       useSSL,
 		S3PublicURL:    getEnv("S3_PUBLIC_URL", "http://localhost:9000"),
+
+		OTelExporterEndpoint: getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+		OTelServiceVersion:   getEnv("OTEL_SERVICE_VERSION", "dev"),
 	}
 	if cfg.DatabaseURL == "" {
 		return cfg, fmt.Errorf("DATABASE_URL is required")

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	oapimiddleware "github.com/oapi-codegen/nethttp-middleware"
 
@@ -40,7 +41,11 @@ func New(opts Options) (http.Handler, error) {
 	spec.Servers = nil
 
 	r := chi.NewRouter()
-	r.Use(chimw.RequestID, chimw.RealIP, chimw.Logger, chimw.Recoverer)
+	// otelhttp (wrapped around the whole router below) assigns each request
+	// its trace ID before any of this runs, so RequestLogger — which reads
+	// that trace ID — supersedes chimw.Logger, and chimw.RequestID's opaque
+	// ID is redundant.
+	r.Use(chimw.RealIP, chimw.Recoverer, middleware.RequestLogger)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   opts.AllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
@@ -72,7 +77,11 @@ func New(opts Options) (http.Handler, error) {
 
 	r.With(middleware.ClientID).Get("/ws/games/{code}", opts.Hub.Upgrade)
 
-	return r, nil
+	// otelhttp starts (and, on response, ends) a span per request — the
+	// trace ID everything else here reads (RequestLogger, the X-Trace-Id
+	// header, and the websocket connection ID minted in ws.Hub.Upgrade)
+	// comes from this span, so it must wrap everything else.
+	return otelhttp.NewHandler(r, "quizmos-backend"), nil
 }
 
 func jsonErrorHandler(ctx context.Context, err error, w http.ResponseWriter, r *http.Request, opts oapimiddleware.ErrorHandlerOpts) {

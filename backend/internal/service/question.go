@@ -68,6 +68,9 @@ func validateOptionsForType(questionType string, options []QuestionOptionInput) 
 }
 
 func (s *Service) CreateQuestion(ctx context.Context, quizID uuid.UUID, questionType, prompt string, timeLimitSeconds, points int, options []QuestionOptionInput) (QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.CreateQuestion")
+	defer span.End()
+
 	if err := s.requireQuiz(ctx, quizID); err != nil {
 		return QuestionWithOptions{}, err
 	}
@@ -114,6 +117,9 @@ func (s *Service) CreateQuestion(ctx context.Context, quizID uuid.UUID, question
 }
 
 func (s *Service) ListQuestions(ctx context.Context, quizID uuid.UUID) ([]QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.ListQuestions")
+	defer span.End()
+
 	questions, err := s.q.ListQuestionsByQuiz(ctx, quizID)
 	if err != nil {
 		return nil, err
@@ -143,6 +149,9 @@ func (s *Service) ListQuestions(ctx context.Context, quizID uuid.UUID) ([]Questi
 }
 
 func (s *Service) GetQuestion(ctx context.Context, quizID, questionID uuid.UUID) (QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.GetQuestion")
+	defer span.End()
+
 	q, err := s.q.GetQuestion(ctx, db.GetQuestionParams{ID: questionID, QuizID: quizID})
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -158,6 +167,9 @@ func (s *Service) GetQuestion(ctx context.Context, quizID, questionID uuid.UUID)
 }
 
 func (s *Service) UpdateQuestion(ctx context.Context, quizID, questionID uuid.UUID, prompt *string, timeLimitSeconds, points *int, options []QuestionOptionInput) (QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.UpdateQuestion")
+	defer span.End()
+
 	var result QuestionWithOptions
 	err := s.withTx(ctx, func(tx *Service) error {
 		q, err := tx.q.UpdateQuestion(ctx, db.UpdateQuestionParams{
@@ -207,6 +219,9 @@ func (s *Service) UpdateQuestion(ctx context.Context, quizID, questionID uuid.UU
 }
 
 func (s *Service) DeleteQuestion(ctx context.Context, quizID, questionID uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "service.DeleteQuestion")
+	defer span.End()
+
 	n, err := s.q.DeleteQuestion(ctx, db.DeleteQuestionParams{ID: questionID, QuizID: quizID})
 	if err != nil {
 		return err
@@ -276,6 +291,9 @@ func MediaLimitBytes(contentType string) (mediaType string, maxBytes int64, ok b
 // returns the updated question. contentType must be one MediaLimitBytes
 // accepts; size is the exact byte count of r.
 func (s *Service) UploadQuestionMedia(ctx context.Context, quizID, questionID uuid.UUID, contentType string, r io.Reader, size int64) (QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.UploadQuestionMedia")
+	defer span.End()
+
 	mediaType, _, ok := MediaLimitBytes(contentType)
 	if !ok {
 		return QuestionWithOptions{}, ErrValidation
@@ -318,6 +336,9 @@ func (s *Service) UploadQuestionMedia(ctx context.Context, quizID, questionID uu
 // DeleteQuestionMedia removes a question's attached media, if any — a
 // no-op (not an error) if it had none.
 func (s *Service) DeleteQuestionMedia(ctx context.Context, quizID, questionID uuid.UUID) (QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.DeleteQuestionMedia")
+	defer span.End()
+
 	question, err := s.q.GetQuestion(ctx, db.GetQuestionParams{ID: questionID, QuizID: quizID})
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -340,6 +361,9 @@ func (s *Service) DeleteQuestionMedia(ctx context.Context, quizID, questionID uu
 }
 
 func (s *Service) ReorderQuestions(ctx context.Context, quizID uuid.UUID, questionIDs []uuid.UUID) ([]QuestionWithOptions, error) {
+	ctx, span := tracer.Start(ctx, "service.ReorderQuestions")
+	defer span.End()
+
 	existing, err := s.q.ListQuestionsByQuiz(ctx, quizID)
 	if err != nil {
 		return nil, err

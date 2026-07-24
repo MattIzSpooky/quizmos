@@ -8,9 +8,19 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
 
 	"github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 )
+
+// tracer is safe to use before telemetry.Setup runs: otel.Tracer returns a
+// lazily-delegating wrapper that resolves the real TracerProvider at each
+// Start call, not at the time this var is initialized. Every exported
+// Service method starts a span with it, named "service.<Method>" — mostly
+// to group and time the DB-query spans (see internal/telemetry, otelpgx)
+// each one triggers, which otherwise appear as an unlabeled, flat pile of
+// siblings under the enclosing HTTP request or websocket message span.
+var tracer = otel.Tracer("quizmos/service")
 
 type Service struct {
 	pool  *pgxpool.Pool

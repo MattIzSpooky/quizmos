@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mattizspooky/quizmos/backend/internal/auth"
@@ -16,6 +19,7 @@ import (
 	"github.com/mattizspooky/quizmos/backend/internal/httpserver"
 	"github.com/mattizspooky/quizmos/backend/internal/service"
 	"github.com/mattizspooky/quizmos/backend/internal/storage"
+	"github.com/mattizspooky/quizmos/backend/internal/telemetry"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
@@ -28,15 +32,43 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	// Telemetry must be set up before anything else logs, since it points
+	// slog.Default() at the handler everything downstream uses.
+	shutdownTelemetry, err := telemetry.Setup(ctx, cfg)
 	if err != nil {
-		log.Fatalf("connect to database: %v", err)
+		log.Fatalf("telemetry: %v", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTelemetry(shutdownCtx); err != nil {
+			slog.Error("telemetry shutdown", "error", err)
+		}
+	}()
+
+	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("parse database url", "error", err)
+		os.Exit(1)
+	}
+	// Gives every query, batch, and pool-acquire a span (see also
+	// PoolStats — otelpgx.RecordStats — if pool exhaustion/latency metrics
+	// are ever needed; out of scope for now, this is tracing only), nested
+	// under whatever span is active on the ctx the query was made with —
+	// the request's HTTP span, or a websocket message's span.
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer(otelpgx.WithTrimSQLInSpanName())
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		slog.Error("connect to database", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	keycloak := auth.NewKeycloak(cfg.KeycloakIssuer, cfg.AdminRole)
 	if err := keycloak.StartRefresh(ctx, 10*time.Minute); err != nil {
-		log.Fatalf("keycloak JWKS: %v", err)
+		slog.Error("keycloak JWKS", "error", err)
+		os.Exit(1)
 	}
 
 	store, err := storage.New(storage.Config{
@@ -48,10 +80,12 @@ func main() {
 		PublicURL: cfg.S3PublicURL,
 	})
 	if err != nil {
-		log.Fatalf("storage client: %v", err)
+		slog.Error("storage client", "error", err)
+		os.Exit(1)
 	}
 	if err := store.EnsureBucket(ctx); err != nil {
-		log.Fatalf("ensure media bucket: %v", err)
+		slog.Error("ensure media bucket", "error", err)
+		os.Exit(1)
 	}
 
 	svc := service.New(pool, store)
@@ -65,23 +99,25 @@ func main() {
 		AllowedOrigins: cfg.AllowedOrigins,
 	})
 	if err != nil {
-		log.Fatalf("build router: %v", err)
+		slog.Error("build router", "error", err)
+		os.Exit(1)
 	}
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: router}
 
 	go func() {
-		log.Printf("quizmos backend listening on %s", cfg.Addr)
+		slog.Info("quizmos backend listening", "addr", cfg.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
+			slog.Error("serve", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down...")
+	slog.Info("shutting down...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown: %v", err)
+		slog.Error("shutdown", "error", err)
 	}
 }

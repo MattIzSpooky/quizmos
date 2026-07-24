@@ -32,6 +32,8 @@ func (h *Handlers) GradeAnswer(ctx context.Context, req api.GradeAnswerRequestOb
 		}
 		return nil, err
 	}
+	logGameAction(ctx, "game.answer_graded", req.GameId, actorAdmin, adminActor(ctx),
+		"target.client_id", graded.ClientID, "question.id", graded.QuestionID, "correct", graded.Correct, "points_awarded", graded.PointsAwarded)
 
 	// Tell the grader's own player their final verdict — they only ever
 	// saw a "pending" answer.result when they first submitted.

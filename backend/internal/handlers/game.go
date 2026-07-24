@@ -31,6 +31,7 @@ func (h *Handlers) CreateGame(ctx context.Context, req api.CreateGameRequestObje
 		}
 		return nil, err
 	}
+	logGameAction(ctx, "game.created", game.ID, actorAdmin, adminActor(ctx), "quiz.id", req.Body.QuizId)
 	return api.CreateGame201JSONResponse(gameToAPI(game)), nil
 }
 
@@ -78,6 +79,7 @@ func (h *Handlers) StartGame(ctx context.Context, req api.StartGameRequestObject
 		return nil, err
 	}
 
+	logGameAction(ctx, "game.started", req.GameId, actorAdmin, adminActor(ctx))
 	h.hub.Broadcast(req.GameId, ws.TypeGameStarted, ws.GameStarted{StartedAt: time.Now()})
 	h.hub.Broadcast(req.GameId, ws.TypeQuestionStarted, questionStartedPayload(firstQuestion, 0, total, game.QuizTimed))
 
@@ -96,6 +98,8 @@ func (h *Handlers) AdvanceGame(ctx context.Context, req api.AdvanceGameRequestOb
 		return nil, err
 	}
 
+	logGameAction(ctx, "game.advanced", req.GameId, actorAdmin, adminActor(ctx),
+		"prev_question_index", result.PrevIndex, "ended", result.Ended)
 	h.hub.Broadcast(req.GameId, ws.TypeQuestionEnded, questionEndedPayload(result.PrevQuestion, result.PrevIndex, result.AnswerCounts))
 
 	if result.Ended {
@@ -134,6 +138,9 @@ func (h *Handlers) ReviewQuestion(ctx context.Context, req api.ReviewQuestionReq
 		return nil, err
 	}
 
+	logGameAction(ctx, "game.question_reviewed", req.GameId, actorAdmin, adminActor(ctx),
+		"question_index", req.Body.QuestionIndex, "is_live", result.IsLive)
+
 	if result.IsLive {
 		// Switching back to the actual current question resumes live
 		// play — it may still be open for answers, and question.reviewed
@@ -165,6 +172,8 @@ func (h *Handlers) ResetQuestionAnswers(ctx context.Context, req api.ResetQuesti
 		return nil, err
 	}
 
+	logGameAction(ctx, "game.answers_reset", req.GameId, actorAdmin, adminActor(ctx),
+		"question_index", req.Body.QuestionIndex)
 	h.hub.Broadcast(req.GameId, ws.TypeQuestionAnswersReset, ws.QuestionAnswersReset{
 		QuestionIndex: int64(result.Question.Position),
 		QuestionID:    result.Question.ID.String(),
@@ -185,6 +194,7 @@ func (h *Handlers) EndGame(ctx context.Context, req api.EndGameRequestObject) (a
 		}
 		return nil, err
 	}
+	logGameAction(ctx, "game.ended", req.GameId, actorAdmin, adminActor(ctx))
 	h.hub.Broadcast(req.GameId, ws.TypeGameEnded, ws.GameEnded{
 		FinalLeaderboard: leaderboardEntriesPayload(result.FinalLeaderboard),
 		EndedAt:          time.Now(),

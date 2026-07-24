@@ -86,6 +86,31 @@ func (f *fakeJWKS) mint(t *testing.T, roles []string, expiry time.Duration) stri
 	return string(signed)
 }
 
+// mintWithUsername is mint plus a preferred_username claim, kept separate
+// rather than added as a parameter to mint so the many existing call sites
+// that don't care about it stay untouched.
+func (f *fakeJWKS) mintWithUsername(t *testing.T, username string, roles []string, expiry time.Duration) string {
+	t.Helper()
+	builder := jwt.NewBuilder().
+		Issuer(f.issuer).
+		Subject("user-123").
+		Claim("preferred_username", username).
+		IssuedAt(time.Now()).
+		Expiration(time.Now().Add(expiry))
+	if roles != nil {
+		builder = builder.Claim("realm_access", map[string]any{"roles": roles})
+	}
+	token, err := builder.Build()
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	signed, err := jwt.Sign(token, jwt.WithKey(jwa.RS256(), f.key))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return string(signed)
+}
+
 func newTestKeycloak(t *testing.T, issuer string) *Keycloak {
 	t.Helper()
 	kc := NewKeycloak(issuer, "quiz-admin")
@@ -115,6 +140,42 @@ func TestVerify_ValidTokenWithRole(t *testing.T) {
 	}
 	if claims.HasRole("nonexistent-role") {
 		t.Error("expected HasRole(nonexistent-role) = false")
+	}
+}
+
+func TestVerify_ExtractsPreferredUsername(t *testing.T) {
+	jwks := newFakeJWKS(t)
+	kc := newTestKeycloak(t, jwks.issuer)
+
+	token := jwks.mintWithUsername(t, "alice@quizmos.dev", []string{"quiz-admin"}, time.Hour)
+
+	claims, err := kc.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Username != "alice@quizmos.dev" {
+		t.Errorf("Username = %q, want %q", claims.Username, "alice@quizmos.dev")
+	}
+	if got := claims.DisplayName(); got != "alice@quizmos.dev" {
+		t.Errorf("DisplayName() = %q, want %q", got, "alice@quizmos.dev")
+	}
+}
+
+func TestVerify_MissingPreferredUsernameFallsBackToSubjectInDisplayName(t *testing.T) {
+	jwks := newFakeJWKS(t)
+	kc := newTestKeycloak(t, jwks.issuer)
+
+	token := jwks.mint(t, []string{"quiz-admin"}, time.Hour) // no preferred_username claim
+
+	claims, err := kc.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Username != "" {
+		t.Errorf("Username = %q, want empty", claims.Username)
+	}
+	if got := claims.DisplayName(); got != "user-123" {
+		t.Errorf("DisplayName() = %q, want %q (fallback to Subject)", got, "user-123")
 	}
 }
 

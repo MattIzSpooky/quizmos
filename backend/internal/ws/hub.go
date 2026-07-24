@@ -8,7 +8,8 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -17,17 +18,45 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 	"github.com/mattizspooky/quizmos/backend/internal/middleware"
 	"github.com/mattizspooky/quizmos/backend/internal/service"
 )
 
+// tracer and meter are safe to use before telemetry.Setup runs: otel.Tracer
+// and otel.Meter both return lazily-delegating wrappers that resolve the
+// real provider at each Start/measurement call, not at the time these vars
+// are initialized.
+var tracer = otel.Tracer("quizmos/ws")
+var meter = otel.Meter("quizmos/ws")
+
+var wsConnectionsActive = func() metric.Int64UpDownCounter {
+	c, err := meter.Int64UpDownCounter("quizmos.ws.connections.active", metric.WithDescription("currently connected websocket clients, across all games"))
+	if err != nil {
+		panic(fmt.Sprintf("ws: create counter quizmos.ws.connections.active: %v", err))
+	}
+	return c
+}()
+
 type client struct {
 	clientID uuid.UUID
 	nickname string
 	conn     *websocket.Conn
 	send     chan Envelope
+
+	// connID correlates every message on this connection without keeping
+	// one trace open for the connection's whole (potentially very long)
+	// lifetime — see handleMessage, which starts a fresh trace per message
+	// and stamps it with this value. It's the handshake request's own
+	// trace ID (assigned by otelhttp, see httpserver.New), reused rather
+	// than minting a second identifier for the same connection.
+	connID string
 }
 
 type room struct {
@@ -90,7 +119,8 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := &client{clientID: clientID, nickname: player.Nickname, conn: conn, send: make(chan Envelope, 16)}
+	connID := trace.SpanContextFromContext(r.Context()).TraceID().String()
+	c := &client{clientID: clientID, nickname: player.Nickname, conn: conn, send: make(chan Envelope, 16), connID: connID}
 	rm := h.roomFor(game.ID)
 
 	rm.mu.Lock()
@@ -98,6 +128,10 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 	count := len(rm.clients)
 	reviewing := rm.reviewing
 	rm.mu.Unlock()
+
+	slog.InfoContext(r.Context(), "ws.connect",
+		"ws.connection_id", connID, "game.id", game.ID, "client.id", clientID, "nickname", player.Nickname)
+	wsConnectionsActive.Add(r.Context(), 1)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -117,6 +151,10 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 	remaining := len(rm.clients)
 	rm.mu.Unlock()
 	close(c.send)
+
+	slog.InfoContext(ctx, "ws.disconnect",
+		"ws.connection_id", connID, "game.id", game.ID, "client.id", clientID)
+	wsConnectionsActive.Add(ctx, -1)
 
 	h.broadcastToRoom(rm, TypePresencePlayerLeft, PresencePlayerLeft{
 		ClientID:    clientID.String(),
@@ -283,16 +321,39 @@ func (h *Hub) readLoop(ctx context.Context, gameID uuid.UUID, c *client) {
 	}
 }
 
+// handleMessage gives every inbound message its own short-lived trace,
+// rather than nesting it under the connection's own (potentially
+// hours-long) handshake span: tracing backends generally assume a trace
+// starts and finishes in seconds, and head-based sampling has to decide
+// before knowing how long a connection will stay open. c.connID (shared by
+// every message on this connection, and by the ws.connect/ws.disconnect
+// log lines above) is how these otherwise-unrelated traces get correlated
+// back into one session.
 func (h *Hub) handleMessage(ctx context.Context, gameID uuid.UUID, c *client, env Envelope) {
+	rootCtx := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
+	msgCtx, span := tracer.Start(rootCtx, "ws."+env.Type, trace.WithAttributes(
+		attribute.String("ws.connection_id", c.connID),
+		attribute.String("ws.message_type", env.Type),
+		attribute.String("game.id", gameID.String()),
+		attribute.String("client.id", c.clientID.String()),
+	))
+	defer span.End()
+
+	slog.InfoContext(msgCtx, "ws.message",
+		"ws.connection_id", c.connID, "ws.message_type", env.Type, "game.id", gameID, "client.id", c.clientID)
+
 	switch env.Type {
 	case TypeAnswerSubmit:
 		var submit AnswerSubmit
 		if err := json.Unmarshal(env.Payload, &submit); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "malformed answer.submit payload")
 			h.sendError(c, "bad_request", "malformed answer.submit payload")
 			return
 		}
-		h.handleAnswerSubmit(ctx, gameID, c, submit)
+		h.handleAnswerSubmit(msgCtx, gameID, c, submit)
 	default:
+		span.SetStatus(codes.Error, "unrecognized message type")
 		h.sendError(c, "unknown_message_type", "unrecognized message type: "+env.Type)
 	}
 }
@@ -300,6 +361,7 @@ func (h *Hub) handleMessage(ctx context.Context, gameID uuid.UUID, c *client, en
 func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *client, submit AnswerSubmit) {
 	questionID, err := uuid.Parse(submit.QuestionID)
 	if err != nil {
+		trace.SpanFromContext(ctx).SetStatus(codes.Error, "questionId must be a UUID")
 		h.sendError(c, "bad_request", "questionId must be a UUID")
 		return
 	}
@@ -308,6 +370,7 @@ func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *clien
 	if submit.OptionID != nil {
 		id, err := uuid.Parse(*submit.OptionID)
 		if err != nil {
+			trace.SpanFromContext(ctx).SetStatus(codes.Error, "optionId must be a UUID")
 			h.sendError(c, "bad_request", "optionId must be a UUID")
 			return
 		}
@@ -316,9 +379,21 @@ func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *clien
 
 	result, err := h.svc.SubmitAnswer(ctx, gameID, c.clientID, questionID, optionID, submit.Text)
 	if err != nil {
+		span := trace.SpanFromContext(ctx)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "answer rejected")
 		h.sendError(c, "answer_rejected", err.Error())
 		return
 	}
+
+	// Same "game.action" shape handlers.logGameAction uses for admin
+	// actions (ws can't import handlers — see the package doc comment —
+	// so this can't share that helper, but keeping the field names
+	// identical keeps both queryable the same way in Loki).
+	slog.InfoContext(ctx, "game.action",
+		"action", "game.answer_submitted", "game.id", gameID,
+		"actor.type", "player", "actor.id", c.clientID, "nickname", c.nickname,
+		"question.id", questionID, "correct", result.Correct, "points_awarded", result.PointsAwarded, "pending", result.Pending)
 
 	h.sendTo(c, TypeAnswerResult, AnswerResult{
 		QuestionID:    submit.QuestionID,
@@ -336,20 +411,20 @@ func (h *Hub) sendError(c *client, code, message string) {
 func (h *Hub) sendTo(c *client, msgType string, payload any) {
 	env, err := encode(msgType, payload)
 	if err != nil {
-		log.Printf("ws: encode %s: %v", msgType, err)
+		slog.Error("ws.encode_failed", "ws.message_type", msgType, "ws.connection_id", c.connID, "error", err)
 		return
 	}
 	select {
 	case c.send <- env:
 	default:
-		log.Printf("ws: dropping %s for client %s: send buffer full", msgType, c.clientID)
+		slog.Warn("ws.send_dropped", "ws.message_type", msgType, "ws.connection_id", c.connID, "client.id", c.clientID)
 	}
 }
 
 func (h *Hub) broadcastToRoom(rm *room, msgType string, payload any) {
 	env, err := encode(msgType, payload)
 	if err != nil {
-		log.Printf("ws: encode %s: %v", msgType, err)
+		slog.Error("ws.encode_failed", "ws.message_type", msgType, "error", err)
 		return
 	}
 	rm.mu.RLock()
@@ -358,7 +433,7 @@ func (h *Hub) broadcastToRoom(rm *room, msgType string, payload any) {
 		select {
 		case c.send <- env:
 		default:
-			log.Printf("ws: dropping %s for client %s: send buffer full", msgType, c.clientID)
+			slog.Warn("ws.send_dropped", "ws.message_type", msgType, "ws.connection_id", c.connID, "client.id", c.clientID)
 		}
 	}
 }

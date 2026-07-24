@@ -79,6 +79,24 @@ services:
       - up
     restart: "no"
 
+  # All-in-one Grafana + Loki (logs) + Tempo (traces) + Mimir/Prometheus
+  # (metrics, unused for now) + an embedded OTel Collector, for local
+  # observability — see backend/internal/telemetry. Grafana's UI is at
+  # http://localhost:3000; no login is required for local anonymous access.
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000" # Grafana UI
+      - "4317:4317" # OTLP gRPC — what OTEL_EXPORTER_OTLP_ENDPOINT points at
+      - "4318:4318" # OTLP HTTP
+    volumes:
+      # Adds the "Quizmos" dashboard (deploy/grafana/dashboards) alongside
+      # the image's own built-in ones — this only *adds* a provider file,
+      # it doesn't replace grafana-dashboards.yaml already baked into the
+      # image.
+      - ./deploy/grafana/provisioning/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/quizmos.yaml:ro
+      - ./deploy/grafana/dashboards:/otel-lgtm/dashboards:ro
+
   backend:
     build:
       context: ./backend
@@ -91,8 +109,14 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # No health condition: telemetry.Setup must never block the backend
+      # from serving real traffic just because the observability stack is
+      # slow to start or unreachable.
+      lgtm:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://quizmos:quizmos-dev@postgres:5432/quizmos?sslmode=disable
+      OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
       # Must be the exact string the browser uses to reach Keycloak (see
       # frontend's VITE_KEYCLOAK_ISSUER default) — the backend checks the
       # JWT's `iss` claim against this literally, and derives its JWKS URL
