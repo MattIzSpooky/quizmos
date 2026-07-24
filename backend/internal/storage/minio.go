@@ -11,7 +11,29 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// tracer is safe to use before telemetry.Setup runs: otel.Tracer returns a
+// lazily-delegating wrapper that resolves the real TracerProvider at each
+// Start call, not at the time this var is initialized.
+var tracer = otel.Tracer("quizmos/storage")
+
+// endSpan records err (if any) as a span error before ending it. Unlike
+// the service package's sentinel errors (ErrNotFound and friends, which
+// are expected business outcomes), every error this package's methods can
+// return reflects an actual MinIO/S3 failure, so it's always worth
+// flagging the span.
+func endSpan(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
+}
 
 type Config struct {
 	// Endpoint is host:port with no scheme — where the backend itself
@@ -53,7 +75,10 @@ func New(cfg Config) (*Client, error) {
 // an anonymous-read policy on it. Question media has to be fetchable
 // directly by players' browsers with no auth and no backend round trip,
 // so the bucket (not just individual objects) is public-read.
-func (c *Client) EnsureBucket(ctx context.Context) error {
+func (c *Client) EnsureBucket(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "storage.EnsureBucket", trace.WithAttributes(attribute.String("s3.bucket", c.bucket)))
+	defer func() { endSpan(span, err) }()
+
 	exists, err := c.mc.BucketExists(ctx, c.bucket)
 	if err != nil {
 		return fmt.Errorf("check bucket %q exists: %w", c.bucket, err)
@@ -80,12 +105,25 @@ func (c *Client) EnsureBucket(ctx context.Context) error {
 
 // Put uploads r as key, streaming rather than buffering — media files
 // can be tens of megabytes and there's no need to hold them in memory.
-func (c *Client) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
-	_, err := c.mc.PutObject(ctx, c.bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType})
+func (c *Client) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) (err error) {
+	ctx, span := tracer.Start(ctx, "storage.Put", trace.WithAttributes(
+		attribute.String("s3.bucket", c.bucket),
+		attribute.String("s3.key", key),
+		attribute.Int64("s3.size_bytes", size),
+	))
+	defer func() { endSpan(span, err) }()
+
+	_, err = c.mc.PutObject(ctx, c.bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType})
 	return err
 }
 
-func (c *Client) Delete(ctx context.Context, key string) error {
+func (c *Client) Delete(ctx context.Context, key string) (err error) {
+	ctx, span := tracer.Start(ctx, "storage.Delete", trace.WithAttributes(
+		attribute.String("s3.bucket", c.bucket),
+		attribute.String("s3.key", key),
+	))
+	defer func() { endSpan(span, err) }()
+
 	return c.mc.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{})
 }
 
