@@ -113,6 +113,15 @@ func (k *Keycloak) keySet() jwk.Set {
 	return k.keys
 }
 
+// Ready reports whether the JWKS keyset has been fetched at least once.
+// StartRefresh fetches it synchronously before returning, so this is only
+// ever false if called before StartRefresh completes — a defensive check
+// for the readiness endpoint (see httpserver.New), not something expected
+// to flip false again once the server is actually serving traffic.
+func (k *Keycloak) Ready() bool {
+	return k.keySet() != nil
+}
+
 type realmAccess struct {
 	Roles []string `json:"roles"`
 }

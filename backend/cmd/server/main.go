@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -92,11 +93,14 @@ func main() {
 	hub := ws.NewHub(svc, cfg.AllowedOrigins)
 	handler := handlers.New(svc, hub, keycloak)
 
+	var shuttingDown atomic.Bool
 	router, err := httpserver.New(httpserver.Options{
 		StrictHandler:  handler,
 		Keycloak:       keycloak,
 		Hub:            hub,
 		AllowedOrigins: cfg.AllowedOrigins,
+		DB:             pool,
+		ShuttingDown:   &shuttingDown,
 	})
 	if err != nil {
 		slog.Error("build router", "error", err)
@@ -114,6 +118,10 @@ func main() {
 	}()
 
 	<-ctx.Done()
+	// Flip readyz to unready before srv.Shutdown even starts draining
+	// in-flight requests, so Kubernetes (or any load balancer polling it)
+	// stops sending new traffic here as early into termination as possible.
+	shuttingDown.Store(true)
 	slog.Info("shutting down...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
