@@ -22,7 +22,7 @@ func (h *Handlers) CreateQuiz(ctx context.Context, req api.CreateQuizRequestObje
 	if err != nil {
 		return nil, err
 	}
-	logQuizAction(ctx, "quiz.created", q.ID, "title", req.Body.Title)
+	quizDomain.LogAdmin(ctx, "quiz.created", q.ID, "title", req.Body.Title)
 	return api.CreateQuiz201JSONResponse(quizToAPI(q)), nil
 }
 
@@ -57,8 +57,25 @@ func (h *Handlers) UpdateQuiz(ctx context.Context, req api.UpdateQuizRequestObje
 		}
 		return nil, err
 	}
-	logQuizAction(ctx, "quiz.updated", q.ID)
+	quizDomain.LogAdmin(ctx, "quiz.updated", q.ID, "fields", updatedQuizFields(req.Body))
 	return api.UpdateQuiz200JSONResponse(quizToAPI(q)), nil
+}
+
+// updatedQuizFields lists which fields an UpdateQuiz request actually
+// touched (as opposed to left unset), so "quiz.updated" says more than
+// just that *something* changed.
+func updatedQuizFields(body *api.UpdateQuizJSONRequestBody) []string {
+	var fields []string
+	if body.Title != nil {
+		fields = append(fields, "title")
+	}
+	if body.Description != nil {
+		fields = append(fields, "description")
+	}
+	if body.Timed != nil {
+		fields = append(fields, "timed")
+	}
+	return fields
 }
 
 func (h *Handlers) DeleteQuiz(ctx context.Context, req api.DeleteQuizRequestObject) (api.DeleteQuizResponseObject, error) {
@@ -69,7 +86,7 @@ func (h *Handlers) DeleteQuiz(ctx context.Context, req api.DeleteQuizRequestObje
 		}
 		return nil, err
 	}
-	logQuizAction(ctx, "quiz.deleted", req.QuizId, "games_closed", len(gameIDs))
+	quizDomain.LogAdmin(ctx, "quiz.deleted", req.QuizId, "games_closed", len(gameIDs))
 	// Any game played from this quiz is gone too now — disconnect anyone
 	// still connected to its room rather than leaving them hanging on a
 	// game that no longer exists.

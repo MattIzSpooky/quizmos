@@ -262,7 +262,7 @@ func TestRequireAdminToken_ValidTokenWithAdminRole(t *testing.T) {
 	kc := newTestKeycloak(t, jwks.issuer)
 	token := jwks.mint(t, []string{"quiz-admin"}, time.Hour)
 
-	claims, err := kc.RequireAdminToken("Bearer " + token)
+	claims, err := kc.RequireAdminToken(context.Background(), "Bearer "+token)
 	if err != nil {
 		t.Fatalf("RequireAdminToken: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestRequireAdminToken_MissingBearerPrefix(t *testing.T) {
 	kc := newTestKeycloak(t, jwks.issuer)
 	token := jwks.mint(t, []string{"quiz-admin"}, time.Hour)
 
-	_, err := kc.RequireAdminToken(token) // no "Bearer " prefix
+	_, err := kc.RequireAdminToken(context.Background(), token) // no "Bearer " prefix
 	if err == nil {
 		t.Fatal("expected an error for a header missing the Bearer prefix")
 	}
@@ -293,7 +293,7 @@ func TestRequireAdminToken_InvalidToken(t *testing.T) {
 	jwks := newFakeJWKS(t)
 	kc := newTestKeycloak(t, jwks.issuer)
 
-	_, err := kc.RequireAdminToken("Bearer not-a-real-token")
+	_, err := kc.RequireAdminToken(context.Background(), "Bearer not-a-real-token")
 	if err == nil {
 		t.Fatal("expected an error for an unparseable token")
 	}
@@ -308,7 +308,7 @@ func TestRequireAdminToken_MissingAdminRole(t *testing.T) {
 	kc := newTestKeycloak(t, jwks.issuer)
 	token := jwks.mint(t, []string{"some-other-role"}, time.Hour)
 
-	_, err := kc.RequireAdminToken("Bearer " + token)
+	_, err := kc.RequireAdminToken(context.Background(), "Bearer "+token)
 	if err == nil {
 		t.Fatal("expected an error for a token without the admin role")
 	}

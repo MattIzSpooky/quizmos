@@ -24,12 +24,19 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/mattizspooky/quizmos/backend/internal/audit"
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
 	"github.com/mattizspooky/quizmos/backend/internal/game"
 	"github.com/mattizspooky/quizmos/backend/internal/middleware"
 	"github.com/mattizspooky/quizmos/backend/internal/question"
 	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 )
+
+// gameDomain logs "game.action" audit lines for player-initiated
+// mutations over the websocket (answer.submit) — the same shape and
+// helper internal/handlers uses for admin-initiated ones, so both are
+// queryable together in Loki regardless of which side triggered them.
+const gameDomain audit.Domain = "game"
 
 // tracer and meter are safe to use before telemetry.Setup runs: otel.Tracer
 // and otel.Meter both return lazily-delegating wrappers that resolve the
@@ -389,14 +396,8 @@ func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *clien
 		return
 	}
 
-	// Same "game.action" shape handlers.logGameAction uses for admin
-	// actions (ws can't import handlers — see the package doc comment —
-	// so this can't share that helper, but keeping the field names
-	// identical keeps both queryable the same way in Loki).
-	slog.InfoContext(ctx, "game.action",
-		"action", "game.answer_submitted", "game.id", gameID,
-		"actor.type", "player", "actor.id", c.clientID, "nickname", c.nickname,
-		"question.id", questionID, "correct", result.Correct, "points_awarded", result.PointsAwarded, "pending", result.Pending)
+	gameDomain.Log(ctx, "game.answer_submitted", gameID, audit.Player, c.clientID.String(),
+		"nickname", c.nickname, "question.id", questionID, "correct", result.Correct, "points_awarded", result.PointsAwarded, "pending", result.Pending)
 
 	h.sendTo(c, TypeAnswerResult, AnswerResult{
 		QuestionID:    submit.QuestionID,

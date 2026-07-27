@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/mattizspooky/quizmos/backend/internal/api"
-	"github.com/mattizspooky/quizmos/backend/internal/auth"
 	"github.com/mattizspooky/quizmos/backend/internal/core"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
@@ -39,7 +38,7 @@ func (h *Handlers) GradeAnswer(ctx context.Context, req api.GradeAnswerRequestOb
 		}
 		return nil, err
 	}
-	logGameAction(ctx, "game.answer_graded", req.GameId, actorAdmin, auth.Actor(ctx),
+	gameDomain.LogAdmin(ctx, "game.answer_graded", req.GameId,
 		"target.client_id", graded.ClientID, "question.id", graded.QuestionID, "correct", graded.Correct, "points_awarded", graded.PointsAwarded)
 
 	// Tell the grader's own player their final verdict — they only ever

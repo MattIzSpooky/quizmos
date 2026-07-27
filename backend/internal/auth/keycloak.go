@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -183,17 +184,24 @@ func (k *Keycloak) Verify(token string) (AdminClaims, error) {
 // question-media upload/delete handlers, whose multipart body the
 // validator would otherwise consume before the handler can stream it to
 // storage (see httpserver's Skipper).
-func (k *Keycloak) RequireAdminToken(header string) (AdminClaims, error) {
+//
+// Every rejection is logged as "auth.rejected" — repeated 401/403s on
+// admin routes are otherwise only visible as generic http.request lines,
+// indistinguishable from a client that just fat-fingered a URL.
+func (k *Keycloak) RequireAdminToken(ctx context.Context, header string) (AdminClaims, error) {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
+		slog.WarnContext(ctx, "auth.rejected", "reason", "missing_bearer_token")
 		return AdminClaims{}, &httpStatusError{status: http.StatusUnauthorized, message: "missing bearer token"}
 	}
 
 	claims, err := k.Verify(strings.TrimPrefix(header, prefix))
 	if err != nil {
+		slog.WarnContext(ctx, "auth.rejected", "reason", "invalid_bearer_token")
 		return AdminClaims{}, &httpStatusError{status: http.StatusUnauthorized, message: "invalid bearer token"}
 	}
 	if !claims.HasRole(k.adminRole) {
+		slog.WarnContext(ctx, "auth.rejected", "reason", "missing_required_role", "subject", claims.Subject, "username", claims.Username)
 		return AdminClaims{}, &httpStatusError{status: http.StatusForbidden, message: "missing required role"}
 	}
 	return claims, nil
@@ -208,7 +216,7 @@ func (k *Keycloak) AuthenticationFunc(ctx context.Context, ai *openapi3filter.Au
 		return fmt.Errorf("unsupported security scheme %q", ai.SecuritySchemeName)
 	}
 
-	claims, err := k.RequireAdminToken(ai.RequestValidationInput.Request.Header.Get("Authorization"))
+	claims, err := k.RequireAdminToken(ctx, ai.RequestValidationInput.Request.Header.Get("Authorization"))
 	if err != nil {
 		return err
 	}

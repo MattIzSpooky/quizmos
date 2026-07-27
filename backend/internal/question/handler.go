@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/mattizspooky/quizmos/backend/internal/api"
+	"github.com/mattizspooky/quizmos/backend/internal/audit"
 	"github.com/mattizspooky/quizmos/backend/internal/auth"
 	"github.com/mattizspooky/quizmos/backend/internal/core"
 )
@@ -20,6 +21,14 @@ type Handler struct {
 func NewHandler(svc *Service, keycloak *auth.Keycloak) *Handler {
 	return &Handler{svc: svc, keycloak: keycloak}
 }
+
+// questionDomain and quizDomain log audit lines ("question.action" and,
+// for the one action that mutates a whole quiz's question order rather
+// than any single question, "quiz.action") — see audit.Domain.
+const (
+	questionDomain audit.Domain = "question"
+	quizDomain     audit.Domain = "quiz"
+)
 
 func notFound() api.NotFoundJSONResponse {
 	return api.NotFoundJSONResponse(apiError("not_found", "question or quiz not found"))
@@ -57,6 +66,7 @@ func (h *Handler) CreateQuestion(ctx context.Context, req api.CreateQuestionRequ
 		}
 		return nil, err
 	}
+	questionDomain.LogAdmin(ctx, "question.created", q.ID, "quiz.id", req.QuizId, "type", req.Body.Type)
 	return api.CreateQuestion201JSONResponse(ToAPI(q)), nil
 }
 
@@ -98,7 +108,28 @@ func (h *Handler) UpdateQuestion(ctx context.Context, req api.UpdateQuestionRequ
 		}
 		return nil, err
 	}
+	questionDomain.LogAdmin(ctx, "question.updated", q.ID, "quiz.id", req.QuizId, "fields", updatedQuestionFields(req.Body))
 	return api.UpdateQuestion200JSONResponse(ToAPI(q)), nil
+}
+
+// updatedQuestionFields lists which fields an UpdateQuestion request
+// actually touched (as opposed to left unset), so "question.updated" says
+// more than just that *something* changed.
+func updatedQuestionFields(body *api.UpdateQuestionJSONRequestBody) []string {
+	var fields []string
+	if body.Prompt != nil {
+		fields = append(fields, "prompt")
+	}
+	if body.TimeLimitSeconds != nil {
+		fields = append(fields, "time_limit_seconds")
+	}
+	if body.Points != nil {
+		fields = append(fields, "points")
+	}
+	if body.Options != nil {
+		fields = append(fields, "options")
+	}
+	return fields
 }
 
 func (h *Handler) DeleteQuestion(ctx context.Context, req api.DeleteQuestionRequestObject) (api.DeleteQuestionResponseObject, error) {
@@ -108,6 +139,7 @@ func (h *Handler) DeleteQuestion(ctx context.Context, req api.DeleteQuestionRequ
 		}
 		return nil, err
 	}
+	questionDomain.LogAdmin(ctx, "question.deleted", req.QuestionId, "quiz.id", req.QuizId)
 	return api.DeleteQuestion204Response{}, nil
 }
 
@@ -120,6 +152,10 @@ func (h *Handler) ReorderQuestions(ctx context.Context, req api.ReorderQuestions
 		}
 		return nil, err
 	}
+	// This reorders the whole quiz's question list, not any single
+	// question, so it's logged against the quiz rather than a question.id
+	// that wouldn't uniquely describe what changed.
+	quizDomain.LogAdmin(ctx, "quiz.questions_reordered", req.QuizId, "count", len(questions))
 	out := make(api.ReorderQuestions200JSONResponse, len(questions))
 	for i, q := range questions {
 		out[i] = ToAPI(q)

@@ -39,7 +39,7 @@ func authHeaderValue(p *string) string {
 // would otherwise consume the multipart body before the handler gets a
 // chance to stream it to storage.
 func (h *Handler) UploadQuestionMedia(ctx context.Context, req api.UploadQuestionMediaRequestObject) (api.UploadQuestionMediaResponseObject, error) {
-	if _, err := h.keycloak.RequireAdminToken(authHeaderValue(req.Params.Authorization)); err != nil {
+	if _, err := h.keycloak.RequireAdminToken(ctx, authHeaderValue(req.Params.Authorization)); err != nil {
 		if isForbidden(err) {
 			return api.UploadQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
 		}
@@ -78,11 +78,12 @@ func (h *Handler) UploadQuestionMedia(ctx context.Context, req api.UploadQuestio
 		}
 		return nil, err
 	}
+	questionDomain.LogAdmin(ctx, "question.media_uploaded", req.QuestionId, "quiz.id", req.QuizId, "content_type", contentType, "bytes", len(data))
 	return api.UploadQuestionMedia200JSONResponse(ToAPI(q)), nil
 }
 
 func (h *Handler) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuestionMediaRequestObject) (api.DeleteQuestionMediaResponseObject, error) {
-	if _, err := h.keycloak.RequireAdminToken(authHeaderValue(req.Params.Authorization)); err != nil {
+	if _, err := h.keycloak.RequireAdminToken(ctx, authHeaderValue(req.Params.Authorization)); err != nil {
 		if isForbidden(err) {
 			return api.DeleteQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
 		}
@@ -96,6 +97,7 @@ func (h *Handler) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuestio
 		}
 		return nil, err
 	}
+	questionDomain.LogAdmin(ctx, "question.media_deleted", req.QuestionId, "quiz.id", req.QuizId)
 	return api.DeleteQuestionMedia200JSONResponse(ToAPI(q)), nil
 }
 
