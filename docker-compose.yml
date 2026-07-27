@@ -117,6 +117,10 @@ services:
     environment:
       DATABASE_URL: postgres://quizmos:quizmos-dev@postgres:5432/quizmos?sslmode=disable
       OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
+      # "json" (default) or "text" — see internal/telemetry.NewStdoutHandler.
+      # Only affects stdout; the OTLP/Loki export is always JSON. Override
+      # per-run with e.g. `LOG_FORMAT=text docker compose up backend`.
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       # Must be the exact string the browser uses to reach Keycloak (see
       # frontend's VITE_KEYCLOAK_ISSUER default) — the backend checks the
       # JWT's `iss` claim against this literally, and derives its JWKS URL

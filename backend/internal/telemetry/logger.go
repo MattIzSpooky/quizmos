@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,12 +14,34 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// NewStdoutHandler builds the trace-correlated stdout handler Setup
+// installs — exported so callers that don't go through Setup at all
+// (namely the e2e suite, which builds its own in-process server without
+// telemetry) can still get the same formatting instead of falling back to
+// slog's bare, unconfigured default. format is "json" (one JSON object
+// per line — what production and the OTLP/Loki export both use) or
+// "text" (slog's human-readable key=value format); anything else falls
+// back to "json".
+func NewStdoutHandler(format string) slog.Handler {
+	var h slog.Handler
+	if format == "text" {
+		h = slog.NewTextHandler(os.Stdout, nil)
+	} else {
+		h = slog.NewJSONHandler(os.Stdout, nil)
+	}
+	return traceEnrichedHandler{h}
+}
+
 // traceEnrichedHandler adds trace_id/span_id attributes (read from the
-// record's context) before delegating to the wrapped handler. The OTLP
-// export path (otelslog.Handler) already correlates records with their span
-// natively, so this only wraps handlers — like the stdout JSON one below —
-// that don't, keeping stdout logs correlatable with a trace even without
-// opening Grafana.
+// record's context) before delegating to the wrapped handler. Setup wraps
+// both the stdout and OTLP handlers with this: the OTLP path is also
+// natively correlated with its span (via ctx passed to Logger.Emit,
+// independent of any attribute), but wrapping it here too puts trace_id
+// and span_id in the rendered JSON body text as well, so they're visible
+// directly in a Loki log line rather than only reachable as structured
+// metadata — and it's what keeps every record (not just the ones that
+// happen to add their own trace_id, like http.request) correlatable on
+// stdout without opening Grafana.
 type traceEnrichedHandler struct {
 	slog.Handler
 }

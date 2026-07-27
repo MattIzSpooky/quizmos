@@ -9,6 +9,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,6 +32,7 @@ import (
 	"github.com/mattizspooky/quizmos/backend/internal/question"
 	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 	"github.com/mattizspooky/quizmos/backend/internal/storage"
+	"github.com/mattizspooky/quizmos/backend/internal/telemetry"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
@@ -70,6 +72,13 @@ func repoRoot() string {
 }
 
 func startEnvironment(ctx context.Context) (*environment, error) {
+	// The e2e suite never calls telemetry.Setup (there's no OTLP collector
+	// to export to here), so without this slog.Default() would stay on
+	// its bare built-in fallback — the old-style "2026/07/27 19:59:23
+	// INFO msg key=value" format — instead of matching what the real
+	// server actually logs.
+	slog.SetDefault(slog.New(telemetry.NewStdoutHandler("json")))
+
 	root := repoRoot()
 	migrationsDir := filepath.Join(root, "backend", "internal", "db", "migrations")
 	migrationFiles, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))

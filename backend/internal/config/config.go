@@ -29,6 +29,12 @@ type Config struct {
 	// no scheme) traces and logs are exported to. See internal/telemetry.
 	OTelExporterEndpoint string
 	OTelServiceVersion   string
+
+	// LogFormat is "json" (the default — one JSON object per line, what
+	// production and the OTLP/Loki export both use) or "text" (slog's
+	// human-readable key=value format, handy for a local terminal). See
+	// telemetry.NewStdoutHandler.
+	LogFormat string
 }
 
 func Load() (Config, error) {
@@ -51,9 +57,14 @@ func Load() (Config, error) {
 
 		OTelExporterEndpoint: getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
 		OTelServiceVersion:   getEnv("OTEL_SERVICE_VERSION", "dev"),
+
+		LogFormat: getEnv("LOG_FORMAT", "json"),
 	}
 	if cfg.DatabaseURL == "" {
 		return cfg, fmt.Errorf("DATABASE_URL is required")
+	}
+	if cfg.LogFormat != "json" && cfg.LogFormat != "text" {
+		return cfg, fmt.Errorf(`LOG_FORMAT: must be "json" or "text", got %q`, cfg.LogFormat)
 	}
 	return cfg, nil
 }
