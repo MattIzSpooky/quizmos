@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"os"
 
-	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -82,7 +81,7 @@ func Setup(ctx context.Context, cfg config.Config) (func(context.Context) error,
 	)
 
 	stdout := traceEnrichedHandler{slog.NewJSONHandler(os.Stdout, nil)}
-	otelHandler := otelslog.NewHandler(serviceName, otelslog.WithLoggerProvider(loggerProvider))
+	otelHandler := newOTLPJSONHandler(loggerProvider.Logger(serviceName))
 	slog.SetDefault(slog.New(fanoutHandler{stdout, otelHandler}))
 
 	metricExporter, err := otlpmetricgrpc.New(ctx,
