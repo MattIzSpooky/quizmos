@@ -23,21 +23,30 @@ func (s *Service) Create(ctx context.Context, createdBy, title, description stri
 	return WithCount{Quiz: q}, nil
 }
 
+// withCountFromRow builds a WithCount from the quiz_summaries view shape
+// (quizzes plus a live question count — see migration 000007), so List and
+// Get need one query each instead of one-plus-a-count-per-row.
+func withCountFromRow(q db.QuizSummary) WithCount {
+	return WithCount{
+		Quiz: db.Quiz{
+			ID: q.ID, Title: q.Title, Description: q.Description, CreatedBy: q.CreatedBy,
+			CreatedAt: q.CreatedAt, UpdatedAt: q.UpdatedAt, Timed: q.Timed,
+		},
+		QuestionCount: int(q.QuestionCount),
+	}
+}
+
 func (s *Service) List(ctx context.Context) ([]WithCount, error) {
 	ctx, span := tracer.Start(ctx, "quiz.List")
 	defer span.End()
 
-	quizzes, err := s.q.ListQuizzes(ctx)
+	rows, err := s.q.ListQuizSummaries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]WithCount, 0, len(quizzes))
-	for _, q := range quizzes {
-		count, err := s.q.CountQuizQuestions(ctx, q.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, WithCount{Quiz: q, QuestionCount: int(count)})
+	out := make([]WithCount, len(rows))
+	for i, r := range rows {
+		out[i] = withCountFromRow(r)
 	}
 	return out, nil
 }
@@ -46,18 +55,14 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (WithCount, error) {
 	ctx, span := tracer.Start(ctx, "quiz.Get")
 	defer span.End()
 
-	q, err := s.q.GetQuiz(ctx, id)
+	q, err := s.q.GetQuizSummary(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return WithCount{}, core.ErrNotFound
 		}
 		return WithCount{}, err
 	}
-	count, err := s.q.CountQuizQuestions(ctx, q.ID)
-	if err != nil {
-		return WithCount{}, err
-	}
-	return WithCount{Quiz: q, QuestionCount: int(count)}, nil
+	return withCountFromRow(q), nil
 }
 
 func (s *Service) GetDetail(ctx context.Context, id uuid.UUID) (WithCount, []question.WithOptions, error) {

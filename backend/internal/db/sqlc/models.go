@@ -33,6 +33,22 @@ type Game struct {
 	EndedAt              pgtype.Timestamptz `json:"ended_at"`
 }
 
+type GameSummary struct {
+	ID                   uuid.UUID          `json:"id"`
+	QuizID               uuid.UUID          `json:"quiz_id"`
+	Code                 string             `json:"code"`
+	Status               string             `json:"status"`
+	CurrentQuestionIndex pgtype.Int4        `json:"current_question_index"`
+	CreatedBy            string             `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	EndedAt              pgtype.Timestamptz `json:"ended_at"`
+	QuizTitle            string             `json:"quiz_title"`
+	QuizTimed            bool               `json:"quiz_timed"`
+	PlayerCount          int32              `json:"player_count"`
+	TotalQuestions       int32              `json:"total_questions"`
+}
+
 type Player struct {
 	ID       uuid.UUID          `json:"id"`
 	GameID   uuid.UUID          `json:"game_id"`
@@ -73,4 +89,15 @@ type Quiz struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Timed       bool               `json:"timed"`
+}
+
+type QuizSummary struct {
+	ID            uuid.UUID          `json:"id"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	CreatedBy     string             `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	Timed         bool               `json:"timed"`
+	QuestionCount int32              `json:"question_count"`
 }

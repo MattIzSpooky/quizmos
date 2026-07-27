@@ -87,19 +87,39 @@ func (q *Queries) GetQuiz(ctx context.Context, id uuid.UUID) (Quiz, error) {
 	return i, err
 }
 
-const listQuizzes = `-- name: ListQuizzes :many
-SELECT id, title, description, created_by, created_at, updated_at, timed FROM quizzes ORDER BY created_at DESC
+const getQuizSummary = `-- name: GetQuizSummary :one
+SELECT id, title, description, created_by, created_at, updated_at, timed, question_count FROM quiz_summaries WHERE id = $1
 `
 
-func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
-	rows, err := q.db.Query(ctx, listQuizzes)
+func (q *Queries) GetQuizSummary(ctx context.Context, id uuid.UUID) (QuizSummary, error) {
+	row := q.db.QueryRow(ctx, getQuizSummary, id)
+	var i QuizSummary
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Timed,
+		&i.QuestionCount,
+	)
+	return i, err
+}
+
+const listQuizSummaries = `-- name: ListQuizSummaries :many
+SELECT id, title, description, created_by, created_at, updated_at, timed, question_count FROM quiz_summaries ORDER BY created_at DESC
+`
+
+func (q *Queries) ListQuizSummaries(ctx context.Context) ([]QuizSummary, error) {
+	rows, err := q.db.Query(ctx, listQuizSummaries)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Quiz
+	var items []QuizSummary
 	for rows.Next() {
-		var i Quiz
+		var i QuizSummary
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
@@ -108,6 +128,7 @@ func (q *Queries) ListQuizzes(ctx context.Context) ([]Quiz, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Timed,
+			&i.QuestionCount,
 		); err != nil {
 			return nil, err
 		}
@@ -136,6 +157,11 @@ type UpdateQuizParams struct {
 	ID          uuid.UUID   `json:"id"`
 }
 
+// Not folded into a single-round-trip CTE like the games.sql mutations
+// below: sqlc's analyzer (v1.31.1) can't resolve sqlc.narg()'d columns
+// once the statement also joins in another relation for the question
+// count, even fully qualified. Stays two round trips (this, then
+// GetQuizSummary) rather than fight the tool further.
 func (q *Queries) UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (Quiz, error) {
 	row := q.db.QueryRow(ctx, updateQuiz,
 		arg.Title,

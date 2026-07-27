@@ -583,9 +583,17 @@ func (h *Hub) BroadcastQuestionStarted(ctx context.Context, gameID uuid.UUID, ba
 		return
 	}
 
+	// One query for every connected client's answer status, rather than a
+	// GetPlayerAnswerStatus round trip per client — a room of N players
+	// would otherwise be N*2 sequential queries just to resume live play.
+	statuses, err := h.games.AnswerStatusesForQuestion(ctx, gameID, questionID)
+	if err != nil {
+		statuses = nil // fall back to sending the un-personalized payload rather than failing the whole broadcast
+	}
+
 	for _, c := range clients {
 		payload := base
-		if status, err := h.games.GetPlayerAnswerStatus(ctx, gameID, c.clientID, questionID); err == nil {
+		if status, ok := statuses[c.clientID]; ok {
 			applyYourAnswer(&payload, status)
 		}
 		h.sendTo(c, TypeQuestionStarted, payload)

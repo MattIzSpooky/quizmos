@@ -70,6 +70,7 @@ type EndGameResult struct {
 }
 
 type PublicGame struct {
+	ID          uuid.UUID
 	Code        string
 	QuizTitle   string
 	Status      string

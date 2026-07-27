@@ -14,46 +14,42 @@ import (
 	"github.com/mattizspooky/quizmos/backend/internal/question"
 )
 
-func (s *Service) summarize(ctx context.Context, g db.Game) (Summary, error) {
-	quiz, err := s.q.GetQuiz(ctx, g.QuizID)
-	if err != nil {
-		return Summary{}, err
-	}
-	playerCount, err := s.q.CountPlayers(ctx, g.ID)
-	if err != nil {
-		return Summary{}, err
-	}
-	total, err := s.q.CountQuizQuestions(ctx, g.QuizID)
-	if err != nil {
-		return Summary{}, err
-	}
+// summaryFromRow builds a Summary from the game_summaries view shape
+// (games joined with its quiz's title/timed, plus live player/question
+// counts — see migration 000007). StartGame/SetCurrentQuestionIndex/EndGame
+// each select this same column set via a CTE so a mutation's result can be
+// converted here too, without a separate round trip to re-fetch the
+// summary afterward — hence the explicit conversion at each call site
+// instead of a single parameter type: db.StartGameRow, db.
+// SetCurrentQuestionIndexRow, and db.EndGameRow are structurally identical
+// to db.GameSummary (same fields, same order), so converting one to
+// another is a plain Go type conversion.
+func summaryFromRow(g db.GameSummary) Summary {
 	return Summary{
-		Game:           g,
-		QuizTitle:      quiz.Title,
-		QuizTimed:      quiz.Timed,
-		PlayerCount:    int(playerCount),
-		TotalQuestions: int(total),
-	}, nil
+		Game: db.Game{
+			ID: g.ID, QuizID: g.QuizID, Code: g.Code, Status: g.Status,
+			CurrentQuestionIndex: g.CurrentQuestionIndex, CreatedBy: g.CreatedBy,
+			CreatedAt: g.CreatedAt, StartedAt: g.StartedAt, EndedAt: g.EndedAt,
+		},
+		QuizTitle:      g.QuizTitle,
+		QuizTimed:      g.QuizTimed,
+		PlayerCount:    int(g.PlayerCount),
+		TotalQuestions: int(g.TotalQuestions),
+	}
 }
 
 func (s *Service) Create(ctx context.Context, createdBy string, quizID uuid.UUID) (Summary, error) {
 	ctx, span := tracer.Start(ctx, "game.Create")
 	defer span.End()
 
-	count, err := s.q.CountQuizQuestions(ctx, quizID)
+	quiz, err := s.q.GetQuizSummary(ctx, quizID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return Summary{}, core.ErrNotFound
 		}
 		return Summary{}, err
 	}
-	if _, err := s.q.GetQuiz(ctx, quizID); err != nil {
-		if err == pgx.ErrNoRows {
-			return Summary{}, core.ErrNotFound
-		}
-		return Summary{}, err
-	}
-	if count == 0 {
+	if quiz.QuestionCount == 0 {
 		return Summary{}, core.ErrValidation
 	}
 
@@ -65,9 +61,14 @@ func (s *Service) Create(ctx context.Context, createdBy string, quizID uuid.UUID
 	if err != nil {
 		return Summary{}, err
 	}
-	summary, err := s.summarize(ctx, g)
-	if err != nil {
-		return Summary{}, err
+	// A freshly created game has no players yet, and the quiz info was
+	// just read above — no need for a further round trip to summarize it.
+	summary := Summary{
+		Game:           g,
+		QuizTitle:      quiz.Title,
+		QuizTimed:      quiz.Timed,
+		PlayerCount:    0,
+		TotalQuestions: int(quiz.QuestionCount),
 	}
 	gamesCreated.Add(ctx, 1)
 	return summary, nil
@@ -77,17 +78,13 @@ func (s *Service) List(ctx context.Context, status *string) ([]Summary, error) {
 	ctx, span := tracer.Start(ctx, "game.List")
 	defer span.End()
 
-	games, err := s.q.ListGames(ctx, core.TextParam(status))
+	rows, err := s.q.ListGames(ctx, core.TextParam(status))
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Summary, 0, len(games))
-	for _, g := range games {
-		summary, err := s.summarize(ctx, g)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, summary)
+	out := make([]Summary, len(rows))
+	for i, r := range rows {
+		out[i] = summaryFromRow(r)
 	}
 	return out, nil
 }
@@ -96,22 +93,18 @@ func (s *Service) GetDetail(ctx context.Context, id uuid.UUID) (Detail, error) {
 	ctx, span := tracer.Start(ctx, "game.GetDetail")
 	defer span.End()
 
-	g, err := s.q.GetGame(ctx, id)
+	g, err := s.q.GetGameSummary(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return Detail{}, core.ErrNotFound
 		}
 		return Detail{}, err
 	}
-	summary, err := s.summarize(ctx, g)
-	if err != nil {
-		return Detail{}, err
-	}
 	players, err := s.q.ListPlayersByGame(ctx, id)
 	if err != nil {
 		return Detail{}, err
 	}
-	return Detail{Summary: summary, Players: players}, nil
+	return Detail{Summary: summaryFromRow(g), Players: players}, nil
 }
 
 // QuestionAtIndex returns the question at the given 0-based position in the
@@ -141,12 +134,8 @@ func (s *Service) Start(ctx context.Context, id uuid.UUID) (Summary, error) {
 		}
 		return Summary{}, err
 	}
-	summary, err := s.summarize(ctx, g)
-	if err != nil {
-		return Summary{}, err
-	}
 	gamesStarted.Add(ctx, 1)
-	return summary, nil
+	return summaryFromRow(db.GameSummary(g)), nil
 }
 
 func (s *Service) Advance(ctx context.Context, id uuid.UUID) (AdvanceResult, error) {
@@ -182,15 +171,11 @@ func (s *Service) Advance(ctx context.Context, id uuid.UUID) (AdvanceResult, err
 		if err != nil {
 			return AdvanceResult{}, err
 		}
-		summary, err := s.summarize(ctx, ended)
-		if err != nil {
-			return AdvanceResult{}, err
-		}
 		leaderboard, err := s.Leaderboard(ctx, id)
 		if err != nil {
 			return AdvanceResult{}, err
 		}
-		result.Game = summary
+		result.Game = summaryFromRow(db.GameSummary(ended))
 		result.Ended = true
 		result.FinalLeaderboard = leaderboard
 		gamesEnded.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "completed")))
@@ -203,15 +188,11 @@ func (s *Service) Advance(ctx context.Context, id uuid.UUID) (AdvanceResult, err
 	if err != nil {
 		return AdvanceResult{}, err
 	}
-	summary, err := s.summarize(ctx, updated)
-	if err != nil {
-		return AdvanceResult{}, err
-	}
 	nextQuestion, _, err := s.QuestionAtIndex(ctx, g.QuizID, nextIndex)
 	if err != nil {
 		return AdvanceResult{}, err
 	}
-	result.Game = summary
+	result.Game = summaryFromRow(db.GameSummary(updated))
 	result.NextQuestion = &nextQuestion
 	return result, nil
 }
@@ -226,7 +207,7 @@ func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex 
 	ctx, span := tracer.Start(ctx, "game.ReviewQuestion")
 	defer span.End()
 
-	g, err := s.q.GetGame(ctx, id)
+	g, err := s.q.GetGameSummary(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return ReviewResult{}, core.ErrNotFound
@@ -241,10 +222,6 @@ func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex 
 		return ReviewResult{}, core.ErrValidation
 	}
 
-	summary, err := s.summarize(ctx, g)
-	if err != nil {
-		return ReviewResult{}, err
-	}
 	q, _, err := s.QuestionAtIndex(ctx, g.QuizID, targetIndex)
 	if err != nil {
 		return ReviewResult{}, err
@@ -254,7 +231,7 @@ func (s *Service) ReviewQuestion(ctx context.Context, id uuid.UUID, targetIndex 
 		return ReviewResult{}, err
 	}
 	return ReviewResult{
-		Game:         summary,
+		Game:         summaryFromRow(g),
 		Question:     q,
 		AnswerCounts: counts,
 		IsLive:       targetIndex == currentIndex,
@@ -271,7 +248,7 @@ func (s *Service) ResetQuestionAnswers(ctx context.Context, id uuid.UUID, target
 	ctx, span := tracer.Start(ctx, "game.ResetQuestionAnswers")
 	defer span.End()
 
-	g, err := s.q.GetGame(ctx, id)
+	g, err := s.q.GetGameSummary(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return ResetAnswersResult{}, core.ErrNotFound
@@ -314,15 +291,14 @@ func (s *Service) ResetQuestionAnswers(ctx context.Context, id uuid.UUID, target
 		return ResetAnswersResult{}, err
 	}
 
-	summary, err := s.summarize(ctx, g)
-	if err != nil {
-		return ResetAnswersResult{}, err
-	}
+	// g was read before the reset, but resetting answers doesn't change
+	// the game row itself (status/current_question_index) or the player
+	// count, so it's still valid to return here.
 	leaderboard, err := s.Leaderboard(ctx, id)
 	if err != nil {
 		return ResetAnswersResult{}, err
 	}
-	return ResetAnswersResult{Game: summary, Question: q, Leaderboard: leaderboard}, nil
+	return ResetAnswersResult{Game: summaryFromRow(g), Question: q, Leaderboard: leaderboard}, nil
 }
 
 func (s *Service) End(ctx context.Context, id uuid.UUID) (EndGameResult, error) {
@@ -336,16 +312,12 @@ func (s *Service) End(ctx context.Context, id uuid.UUID) (EndGameResult, error) 
 		}
 		return EndGameResult{}, err
 	}
-	summary, err := s.summarize(ctx, g)
-	if err != nil {
-		return EndGameResult{}, err
-	}
 	leaderboard, err := s.Leaderboard(ctx, id)
 	if err != nil {
 		return EndGameResult{}, err
 	}
 	gamesEnded.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "force_ended")))
-	return EndGameResult{Game: summary, FinalLeaderboard: leaderboard}, nil
+	return EndGameResult{Game: summaryFromRow(db.GameSummary(g)), FinalLeaderboard: leaderboard}, nil
 }
 
 func (s *Service) answerCounts(ctx context.Context, questionID uuid.UUID) (map[uuid.UUID]int, error) {
@@ -380,40 +352,16 @@ func (s *Service) Leaderboard(ctx context.Context, gameID uuid.UUID) ([]Leaderbo
 	return out, nil
 }
 
-// GetByCode returns the raw game row for a join code, without requiring
-// or creating a player.
-func (s *Service) GetByCode(ctx context.Context, code string) (db.Game, error) {
-	ctx, span := tracer.Start(ctx, "game.GetByCode")
-	defer span.End()
-
-	g, err := s.q.GetGameByCode(ctx, code)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return db.Game{}, core.ErrNotFound
-		}
-		return db.Game{}, err
-	}
-	return g, nil
-}
-
 func (s *Service) GetPublic(ctx context.Context, code string) (PublicGame, error) {
 	ctx, span := tracer.Start(ctx, "game.GetPublic")
 	defer span.End()
 
-	g, err := s.q.GetGameByCode(ctx, code)
+	g, err := s.q.GetGameSummaryByCode(ctx, code)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return PublicGame{}, core.ErrNotFound
 		}
 		return PublicGame{}, err
 	}
-	quiz, err := s.q.GetQuiz(ctx, g.QuizID)
-	if err != nil {
-		return PublicGame{}, err
-	}
-	playerCount, err := s.q.CountPlayers(ctx, g.ID)
-	if err != nil {
-		return PublicGame{}, err
-	}
-	return PublicGame{Code: g.Code, QuizTitle: quiz.Title, Status: g.Status, PlayerCount: int(playerCount)}, nil
+	return PublicGame{ID: g.ID, Code: g.Code, QuizTitle: g.QuizTitle, Status: g.Status, PlayerCount: int(g.PlayerCount)}, nil
 }

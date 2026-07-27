@@ -27,35 +27,48 @@ type Querier interface {
 	DeletePlayer(ctx context.Context, arg DeletePlayerParams) (int64, error)
 	DeleteQuestion(ctx context.Context, arg DeleteQuestionParams) (int64, error)
 	DeleteQuiz(ctx context.Context, id uuid.UUID) (int64, error)
-	EndGame(ctx context.Context, id uuid.UUID) (Game, error)
+	EndGame(ctx context.Context, id uuid.UUID) (EndGameRow, error)
 	GameCodeExists(ctx context.Context, code string) (bool, error)
 	GetAnswer(ctx context.Context, arg GetAnswerParams) (Answer, error)
 	GetAnswerByID(ctx context.Context, id uuid.UUID) (Answer, error)
 	GetAnswersForQuestion(ctx context.Context, arg GetAnswersForQuestionParams) ([]Answer, error)
 	GetGame(ctx context.Context, id uuid.UUID) (Game, error)
 	GetGameByCode(ctx context.Context, code string) (Game, error)
+	GetGameSummary(ctx context.Context, id uuid.UUID) (GameSummary, error)
+	GetGameSummaryByCode(ctx context.Context, code string) (GameSummary, error)
 	GetOption(ctx context.Context, id uuid.UUID) (QuestionOption, error)
 	GetPlayer(ctx context.Context, arg GetPlayerParams) (Player, error)
 	GetPlayerByID(ctx context.Context, id uuid.UUID) (Player, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
 	GetQuestionByID(ctx context.Context, id uuid.UUID) (Question, error)
 	GetQuiz(ctx context.Context, id uuid.UUID) (Quiz, error)
+	GetQuizSummary(ctx context.Context, id uuid.UUID) (QuizSummary, error)
 	GradeAnswer(ctx context.Context, arg GradeAnswerParams) (Answer, error)
 	LeaderboardByGame(ctx context.Context, gameID uuid.UUID) ([]LeaderboardByGameRow, error)
+	// Every player's answer (if any) to one question in one game, keyed by
+	// client_id — used to personalize a question.started broadcast to every
+	// connected client in a single query instead of one GetPlayer+GetAnswer
+	// pair per client.
+	ListAnswerStatusesForQuestion(ctx context.Context, arg ListAnswerStatusesForQuestionParams) ([]ListAnswerStatusesForQuestionRow, error)
 	ListFreeTextAnswersForQuestion(ctx context.Context, arg ListFreeTextAnswersForQuestionParams) ([]ListFreeTextAnswersForQuestionRow, error)
-	ListGames(ctx context.Context, status pgtype.Text) ([]Game, error)
+	ListGames(ctx context.Context, status pgtype.Text) ([]GameSummary, error)
 	ListGamesByQuiz(ctx context.Context, quizID uuid.UUID) ([]Game, error)
 	ListOptionsByQuestion(ctx context.Context, questionID uuid.UUID) ([]QuestionOption, error)
 	ListOptionsByQuestionIDs(ctx context.Context, questionIds []uuid.UUID) ([]QuestionOption, error)
 	ListPlayersByGame(ctx context.Context, gameID uuid.UUID) ([]Player, error)
 	ListQuestionsByQuiz(ctx context.Context, quizID uuid.UUID) ([]Question, error)
-	ListQuizzes(ctx context.Context) ([]Quiz, error)
+	ListQuizSummaries(ctx context.Context) ([]QuizSummary, error)
 	NextQuestionPosition(ctx context.Context, quizID uuid.UUID) (int32, error)
-	SetCurrentQuestionIndex(ctx context.Context, arg SetCurrentQuestionIndexParams) (Game, error)
+	SetCurrentQuestionIndex(ctx context.Context, arg SetCurrentQuestionIndexParams) (SetCurrentQuestionIndexRow, error)
 	SetQuestionMedia(ctx context.Context, arg SetQuestionMediaParams) (Question, error)
 	SetQuestionPosition(ctx context.Context, arg SetQuestionPositionParams) error
-	StartGame(ctx context.Context, id uuid.UUID) (Game, error)
+	StartGame(ctx context.Context, id uuid.UUID) (StartGameRow, error)
 	UpdateQuestion(ctx context.Context, arg UpdateQuestionParams) (Question, error)
+	// Not folded into a single-round-trip CTE like the games.sql mutations
+	// below: sqlc's analyzer (v1.31.1) can't resolve sqlc.narg()'d columns
+	// once the statement also joins in another relation for the question
+	// count, even fully qualified. Stays two round trips (this, then
+	// GetQuizSummary) rather than fight the tool further.
 	UpdateQuiz(ctx context.Context, arg UpdateQuizParams) (Quiz, error)
 	UpsertPlayer(ctx context.Context, arg UpsertPlayerParams) (Player, error)
 }

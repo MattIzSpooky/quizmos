@@ -262,18 +262,42 @@ func (s *Service) GetPlayerAnswerStatus(ctx context.Context, gameID, clientID, q
 		return PlayerAnswerStatus{}, err
 	}
 
-	status := PlayerAnswerStatus{Answered: true, PointsAwarded: int(answer.PointsAwarded)}
-	if answer.SelectedOptionID.Valid {
-		id := uuid.UUID(answer.SelectedOptionID.Bytes)
+	return answerStatusFrom(answer.SelectedOptionID, answer.AnswerText, answer.IsCorrect, answer.PointsAwarded), nil
+}
+
+// AnswerStatusesForQuestion returns every player's answer (if any) to one
+// question in one game, keyed by client ID. It exists for callers that
+// need every connected player's status at once — e.g. personalizing a
+// question.started broadcast — so they can do it in one query instead of
+// one GetPlayerAnswerStatus (itself 2 queries) per player.
+func (s *Service) AnswerStatusesForQuestion(ctx context.Context, gameID, questionID uuid.UUID) (map[uuid.UUID]PlayerAnswerStatus, error) {
+	ctx, span := tracer.Start(ctx, "game.AnswerStatusesForQuestion")
+	defer span.End()
+
+	rows, err := s.q.ListAnswerStatusesForQuestion(ctx, db.ListAnswerStatusesForQuestionParams{GameID: gameID, QuestionID: questionID})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]PlayerAnswerStatus, len(rows))
+	for _, r := range rows {
+		out[r.ClientID] = answerStatusFrom(r.SelectedOptionID, r.AnswerText, r.IsCorrect, r.PointsAwarded)
+	}
+	return out, nil
+}
+
+func answerStatusFrom(selectedOptionID pgtype.UUID, answerText pgtype.Text, isCorrect pgtype.Bool, pointsAwarded int32) PlayerAnswerStatus {
+	status := PlayerAnswerStatus{Answered: true, PointsAwarded: int(pointsAwarded)}
+	if selectedOptionID.Valid {
+		id := uuid.UUID(selectedOptionID.Bytes)
 		status.SelectedOptionID = &id
 	}
-	if answer.AnswerText.Valid {
-		status.Text = &answer.AnswerText.String
+	if answerText.Valid {
+		status.Text = &answerText.String
 	}
-	if answer.IsCorrect.Valid {
-		status.Correct = answer.IsCorrect.Bool
+	if isCorrect.Valid {
+		status.Correct = isCorrect.Bool
 	} else {
 		status.Pending = true
 	}
-	return status, nil
+	return status
 }

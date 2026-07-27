@@ -53,15 +53,40 @@ func (q *Queries) CreateGame(ctx context.Context, arg CreateGameParams) (Game, e
 }
 
 const endGame = `-- name: EndGame :one
-UPDATE games
-SET status = 'ended', ended_at = now()
-WHERE id = $1 AND status != 'ended'
-RETURNING id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at
+WITH updated AS (
+    UPDATE games
+    SET status = 'ended', ended_at = now()
+    WHERE games.id = $1 AND games.status != 'ended'
+    RETURNING id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at
+)
+SELECT updated.id, updated.quiz_id, updated.code, updated.status, updated.current_question_index, updated.created_by, updated.created_at, updated.started_at, updated.ended_at,
+       qz.title AS quiz_title,
+       qz.timed AS quiz_timed,
+       (SELECT count(*) FROM players  p WHERE p.game_id  = updated.id)::int      AS player_count,
+       (SELECT count(*) FROM questions q WHERE q.quiz_id = updated.quiz_id)::int AS total_questions
+FROM updated
+JOIN quizzes qz ON qz.id = updated.quiz_id
 `
 
-func (q *Queries) EndGame(ctx context.Context, id uuid.UUID) (Game, error) {
+type EndGameRow struct {
+	ID                   uuid.UUID          `json:"id"`
+	QuizID               uuid.UUID          `json:"quiz_id"`
+	Code                 string             `json:"code"`
+	Status               string             `json:"status"`
+	CurrentQuestionIndex pgtype.Int4        `json:"current_question_index"`
+	CreatedBy            string             `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	EndedAt              pgtype.Timestamptz `json:"ended_at"`
+	QuizTitle            string             `json:"quiz_title"`
+	QuizTimed            bool               `json:"quiz_timed"`
+	PlayerCount          int32              `json:"player_count"`
+	TotalQuestions       int32              `json:"total_questions"`
+}
+
+func (q *Queries) EndGame(ctx context.Context, id uuid.UUID) (EndGameRow, error) {
 	row := q.db.QueryRow(ctx, endGame, id)
-	var i Game
+	var i EndGameRow
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
@@ -72,6 +97,10 @@ func (q *Queries) EndGame(ctx context.Context, id uuid.UUID) (Game, error) {
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.EndedAt,
+		&i.QuizTitle,
+		&i.QuizTimed,
+		&i.PlayerCount,
+		&i.TotalQuestions,
 	)
 	return i, err
 }
@@ -129,21 +158,71 @@ func (q *Queries) GetGameByCode(ctx context.Context, code string) (Game, error) 
 	return i, err
 }
 
+const getGameSummary = `-- name: GetGameSummary :one
+SELECT id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at, quiz_title, quiz_timed, player_count, total_questions FROM game_summaries WHERE id = $1
+`
+
+func (q *Queries) GetGameSummary(ctx context.Context, id uuid.UUID) (GameSummary, error) {
+	row := q.db.QueryRow(ctx, getGameSummary, id)
+	var i GameSummary
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.Code,
+		&i.Status,
+		&i.CurrentQuestionIndex,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.QuizTitle,
+		&i.QuizTimed,
+		&i.PlayerCount,
+		&i.TotalQuestions,
+	)
+	return i, err
+}
+
+const getGameSummaryByCode = `-- name: GetGameSummaryByCode :one
+SELECT id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at, quiz_title, quiz_timed, player_count, total_questions FROM game_summaries WHERE code = $1
+`
+
+func (q *Queries) GetGameSummaryByCode(ctx context.Context, code string) (GameSummary, error) {
+	row := q.db.QueryRow(ctx, getGameSummaryByCode, code)
+	var i GameSummary
+	err := row.Scan(
+		&i.ID,
+		&i.QuizID,
+		&i.Code,
+		&i.Status,
+		&i.CurrentQuestionIndex,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.QuizTitle,
+		&i.QuizTimed,
+		&i.PlayerCount,
+		&i.TotalQuestions,
+	)
+	return i, err
+}
+
 const listGames = `-- name: ListGames :many
-SELECT id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at FROM games
+SELECT id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at, quiz_title, quiz_timed, player_count, total_questions FROM game_summaries
 WHERE $1::text IS NULL OR status = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListGames(ctx context.Context, status pgtype.Text) ([]Game, error) {
+func (q *Queries) ListGames(ctx context.Context, status pgtype.Text) ([]GameSummary, error) {
 	rows, err := q.db.Query(ctx, listGames, status)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Game
+	var items []GameSummary
 	for rows.Next() {
-		var i Game
+		var i GameSummary
 		if err := rows.Scan(
 			&i.ID,
 			&i.QuizID,
@@ -154,6 +233,10 @@ func (q *Queries) ListGames(ctx context.Context, status pgtype.Text) ([]Game, er
 			&i.CreatedAt,
 			&i.StartedAt,
 			&i.EndedAt,
+			&i.QuizTitle,
+			&i.QuizTimed,
+			&i.PlayerCount,
+			&i.TotalQuestions,
 		); err != nil {
 			return nil, err
 		}
@@ -200,10 +283,19 @@ func (q *Queries) ListGamesByQuiz(ctx context.Context, quizID uuid.UUID) ([]Game
 }
 
 const setCurrentQuestionIndex = `-- name: SetCurrentQuestionIndex :one
-UPDATE games
-SET current_question_index = $2
-WHERE id = $1 AND status = 'in_progress'
-RETURNING id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at
+WITH updated AS (
+    UPDATE games
+    SET current_question_index = $2
+    WHERE games.id = $1 AND games.status = 'in_progress'
+    RETURNING id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at
+)
+SELECT updated.id, updated.quiz_id, updated.code, updated.status, updated.current_question_index, updated.created_by, updated.created_at, updated.started_at, updated.ended_at,
+       qz.title AS quiz_title,
+       qz.timed AS quiz_timed,
+       (SELECT count(*) FROM players  p WHERE p.game_id  = updated.id)::int      AS player_count,
+       (SELECT count(*) FROM questions q WHERE q.quiz_id = updated.quiz_id)::int AS total_questions
+FROM updated
+JOIN quizzes qz ON qz.id = updated.quiz_id
 `
 
 type SetCurrentQuestionIndexParams struct {
@@ -211,9 +303,25 @@ type SetCurrentQuestionIndexParams struct {
 	CurrentQuestionIndex pgtype.Int4 `json:"current_question_index"`
 }
 
-func (q *Queries) SetCurrentQuestionIndex(ctx context.Context, arg SetCurrentQuestionIndexParams) (Game, error) {
+type SetCurrentQuestionIndexRow struct {
+	ID                   uuid.UUID          `json:"id"`
+	QuizID               uuid.UUID          `json:"quiz_id"`
+	Code                 string             `json:"code"`
+	Status               string             `json:"status"`
+	CurrentQuestionIndex pgtype.Int4        `json:"current_question_index"`
+	CreatedBy            string             `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	EndedAt              pgtype.Timestamptz `json:"ended_at"`
+	QuizTitle            string             `json:"quiz_title"`
+	QuizTimed            bool               `json:"quiz_timed"`
+	PlayerCount          int32              `json:"player_count"`
+	TotalQuestions       int32              `json:"total_questions"`
+}
+
+func (q *Queries) SetCurrentQuestionIndex(ctx context.Context, arg SetCurrentQuestionIndexParams) (SetCurrentQuestionIndexRow, error) {
 	row := q.db.QueryRow(ctx, setCurrentQuestionIndex, arg.ID, arg.CurrentQuestionIndex)
-	var i Game
+	var i SetCurrentQuestionIndexRow
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
@@ -224,20 +332,49 @@ func (q *Queries) SetCurrentQuestionIndex(ctx context.Context, arg SetCurrentQue
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.EndedAt,
+		&i.QuizTitle,
+		&i.QuizTimed,
+		&i.PlayerCount,
+		&i.TotalQuestions,
 	)
 	return i, err
 }
 
 const startGame = `-- name: StartGame :one
-UPDATE games
-SET status = 'in_progress', current_question_index = 0, started_at = now()
-WHERE id = $1 AND status = 'lobby'
-RETURNING id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at
+WITH updated AS (
+    UPDATE games
+    SET status = 'in_progress', current_question_index = 0, started_at = now()
+    WHERE games.id = $1 AND games.status = 'lobby'
+    RETURNING id, quiz_id, code, status, current_question_index, created_by, created_at, started_at, ended_at
+)
+SELECT updated.id, updated.quiz_id, updated.code, updated.status, updated.current_question_index, updated.created_by, updated.created_at, updated.started_at, updated.ended_at,
+       qz.title AS quiz_title,
+       qz.timed AS quiz_timed,
+       (SELECT count(*) FROM players  p WHERE p.game_id  = updated.id)::int      AS player_count,
+       (SELECT count(*) FROM questions q WHERE q.quiz_id = updated.quiz_id)::int AS total_questions
+FROM updated
+JOIN quizzes qz ON qz.id = updated.quiz_id
 `
 
-func (q *Queries) StartGame(ctx context.Context, id uuid.UUID) (Game, error) {
+type StartGameRow struct {
+	ID                   uuid.UUID          `json:"id"`
+	QuizID               uuid.UUID          `json:"quiz_id"`
+	Code                 string             `json:"code"`
+	Status               string             `json:"status"`
+	CurrentQuestionIndex pgtype.Int4        `json:"current_question_index"`
+	CreatedBy            string             `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	EndedAt              pgtype.Timestamptz `json:"ended_at"`
+	QuizTitle            string             `json:"quiz_title"`
+	QuizTimed            bool               `json:"quiz_timed"`
+	PlayerCount          int32              `json:"player_count"`
+	TotalQuestions       int32              `json:"total_questions"`
+}
+
+func (q *Queries) StartGame(ctx context.Context, id uuid.UUID) (StartGameRow, error) {
 	row := q.db.QueryRow(ctx, startGame, id)
-	var i Game
+	var i StartGameRow
 	err := row.Scan(
 		&i.ID,
 		&i.QuizID,
@@ -248,6 +385,10 @@ func (q *Queries) StartGame(ctx context.Context, id uuid.UUID) (Game, error) {
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.EndedAt,
+		&i.QuizTitle,
+		&i.QuizTimed,
+		&i.PlayerCount,
+		&i.TotalQuestions,
 	)
 	return i, err
 }

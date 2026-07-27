@@ -18,6 +18,16 @@ GROUP BY selected_option_id;
 -- name: GetAnswersForQuestion :many
 SELECT * FROM answers WHERE game_id = $1 AND question_id = $2;
 
+-- name: ListAnswerStatusesForQuestion :many
+-- Every player's answer (if any) to one question in one game, keyed by
+-- client_id — used to personalize a question.started broadcast to every
+-- connected client in a single query instead of one GetPlayer+GetAnswer
+-- pair per client.
+SELECT p.client_id, a.*
+FROM answers a
+JOIN players p ON p.id = a.player_id
+WHERE a.game_id = $1 AND a.question_id = $2;
+
 -- name: ListFreeTextAnswersForQuestion :many
 SELECT a.*, p.nickname, p.client_id
 FROM answers a

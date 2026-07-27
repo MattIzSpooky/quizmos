@@ -75,11 +75,7 @@ func (h *Handlers) GetPublicLeaderboard(ctx context.Context, req api.GetPublicLe
 		}
 		return nil, err
 	}
-	gameRow, err := h.games.GetByCode(ctx, g.Code)
-	if err != nil {
-		return nil, err
-	}
-	leaderboard, err := h.games.Leaderboard(ctx, gameRow.ID)
+	leaderboard, err := h.games.Leaderboard(ctx, g.ID)
 	if err != nil {
 		return nil, err
 	}

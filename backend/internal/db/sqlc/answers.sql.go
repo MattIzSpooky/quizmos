@@ -215,6 +215,66 @@ func (q *Queries) GradeAnswer(ctx context.Context, arg GradeAnswerParams) (Answe
 	return i, err
 }
 
+const listAnswerStatusesForQuestion = `-- name: ListAnswerStatusesForQuestion :many
+SELECT p.client_id, a.id, a.game_id, a.question_id, a.player_id, a.selected_option_id, a.is_correct, a.points_awarded, a.answered_at, a.answer_text
+FROM answers a
+JOIN players p ON p.id = a.player_id
+WHERE a.game_id = $1 AND a.question_id = $2
+`
+
+type ListAnswerStatusesForQuestionParams struct {
+	GameID     uuid.UUID `json:"game_id"`
+	QuestionID uuid.UUID `json:"question_id"`
+}
+
+type ListAnswerStatusesForQuestionRow struct {
+	ClientID         uuid.UUID          `json:"client_id"`
+	ID               uuid.UUID          `json:"id"`
+	GameID           uuid.UUID          `json:"game_id"`
+	QuestionID       uuid.UUID          `json:"question_id"`
+	PlayerID         uuid.UUID          `json:"player_id"`
+	SelectedOptionID pgtype.UUID        `json:"selected_option_id"`
+	IsCorrect        pgtype.Bool        `json:"is_correct"`
+	PointsAwarded    int32              `json:"points_awarded"`
+	AnsweredAt       pgtype.Timestamptz `json:"answered_at"`
+	AnswerText       pgtype.Text        `json:"answer_text"`
+}
+
+// Every player's answer (if any) to one question in one game, keyed by
+// client_id — used to personalize a question.started broadcast to every
+// connected client in a single query instead of one GetPlayer+GetAnswer
+// pair per client.
+func (q *Queries) ListAnswerStatusesForQuestion(ctx context.Context, arg ListAnswerStatusesForQuestionParams) ([]ListAnswerStatusesForQuestionRow, error) {
+	rows, err := q.db.Query(ctx, listAnswerStatusesForQuestion, arg.GameID, arg.QuestionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAnswerStatusesForQuestionRow
+	for rows.Next() {
+		var i ListAnswerStatusesForQuestionRow
+		if err := rows.Scan(
+			&i.ClientID,
+			&i.ID,
+			&i.GameID,
+			&i.QuestionID,
+			&i.PlayerID,
+			&i.SelectedOptionID,
+			&i.IsCorrect,
+			&i.PointsAwarded,
+			&i.AnsweredAt,
+			&i.AnswerText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFreeTextAnswersForQuestion = `-- name: ListFreeTextAnswersForQuestion :many
 SELECT a.id, a.game_id, a.question_id, a.player_id, a.selected_option_id, a.is_correct, a.points_awarded, a.answered_at, a.answer_text, p.nickname, p.client_id
 FROM answers a

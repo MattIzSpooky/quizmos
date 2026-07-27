@@ -6,10 +6,18 @@ RETURNING *;
 -- name: GetQuiz :one
 SELECT * FROM quizzes WHERE id = $1;
 
--- name: ListQuizzes :many
-SELECT * FROM quizzes ORDER BY created_at DESC;
+-- name: GetQuizSummary :one
+SELECT * FROM quiz_summaries WHERE id = $1;
+
+-- name: ListQuizSummaries :many
+SELECT * FROM quiz_summaries ORDER BY created_at DESC;
 
 -- name: UpdateQuiz :one
+-- Not folded into a single-round-trip CTE like the games.sql mutations
+-- below: sqlc's analyzer (v1.31.1) can't resolve sqlc.narg()'d columns
+-- once the statement also joins in another relation for the question
+-- count, even fully qualified. Stays two round trips (this, then
+-- GetQuizSummary) rather than fight the tool further.
 UPDATE quizzes
 SET title       = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
