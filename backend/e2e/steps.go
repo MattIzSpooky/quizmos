@@ -56,6 +56,9 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^I try to upload media with no bearer token$`, iTryToUploadMediaWithNoBearerToken)
 	sc.Step(`^I try to upload media with an invalid bearer token$`, iTryToUploadMediaWithAnInvalidBearerToken)
 	sc.Step(`^I try to upload media as a user without the admin role$`, iTryToUploadMediaAsAUserWithoutTheAdminRole)
+	sc.Step(`^I try to delete media with no bearer token$`, iTryToDeleteMediaWithNoBearerToken)
+	sc.Step(`^I try to delete media with an invalid bearer token$`, iTryToDeleteMediaWithAnInvalidBearerToken)
+	sc.Step(`^I try to delete media as a user without the admin role$`, iTryToDeleteMediaAsAUserWithoutTheAdminRole)
 
 	sc.Step(`^(?:I create a|a) quiz titled "([^"]*)"$`, aQuizTitled)
 	sc.Step(`^(?:I create an|an) untimed quiz titled "([^"]*)"$`, anUntimedQuizTitled)
@@ -77,6 +80,11 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^getting the game should fail with status (\d+)$`, gettingTheGameShouldFailWithStatus)
 	sc.Step(`^the previously uploaded media should no longer be reachable$`, thePreviouslyUploadedMediaShouldNoLongerBeReachable)
 	sc.Step(`^getting an unknown quiz should fail with status (\d+)$`, gettingAnUnknownQuizShouldFailWithStatus)
+	sc.Step(`^updating an unknown quiz should fail with status (\d+)$`, updatingAnUnknownQuizShouldFail)
+	sc.Step(`^deleting an unknown quiz should fail with status (\d+)$`, deletingAnUnknownQuizShouldFail)
+	sc.Step(`^updating an unknown question should fail with status (\d+)$`, updatingAnUnknownQuestionShouldFail)
+	sc.Step(`^deleting an unknown question should fail with status (\d+)$`, deletingAnUnknownQuestionShouldFail)
+	sc.Step(`^getting "([^"]*)" through the wrong quiz should fail with status (\d+)$`, gettingQuestionThroughWrongQuizShouldFail)
 	sc.Step(`^the quiz list should include "([^"]*)" and "([^"]*)"$`, theQuizListShouldInclude)
 	sc.Step(`^the game list should include this game$`, theGameListShouldIncludeThisGame)
 	sc.Step(`^the game list filtered by status "([^"]*)" should (include|not include) this game$`, theGameListFilteredByStatusShouldIncludeThisGame)
@@ -92,6 +100,7 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^uploading media for an unknown question should fail with status (\d+)$`, uploadingMediaForAnUnknownQuestionShouldFail)
 
 	sc.Step(`^I create a game for the quiz$`, iCreateAGameForTheQuiz)
+	sc.Step(`^I try to create a game for an unknown quiz$`, iTryToCreateAGameForAnUnknownQuiz)
 	sc.Step(`^"([^"]*)" joins the game$`, joinsTheGame)
 	sc.Step(`^"([^"]*)" joins the game with color "([^"]*)"$`, joinsTheGameWithColor)
 	sc.Step(`^"([^"]*)" should be shown to the admin with color "([^"]*)"$`, shouldBeShownToTheAdminWithColor)
@@ -104,10 +113,15 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^kicking "([^"]*)" should fail with status (\d+)$`, kickingShouldFailWithStatus)
 	sc.Step(`^kicking a player who never joined should fail with status (\d+)$`, kickingANonexistentPlayerShouldFail)
 	sc.Step(`^"([^"]*)" joins the game again with color "([^"]*)"$`, rejoinsTheGameWithColor)
+	sc.Step(`^the admin should see "([^"]*)" as (connected|not connected)$`, theAdminShouldSeeAsConnected)
 
 	sc.Step(`^"([^"]*)" connects to the game websocket$`, connectsToTheGameWebsocket)
 	sc.Step(`^"([^"]*)" reconnects to the game websocket$`, connectsToTheGameWebsocket)
 	sc.Step(`^"([^"]*)" disconnects$`, disconnects)
+	sc.Step(`^"([^"]*)"'s websocket connection should be closed$`, websocketConnectionShouldBeClosed)
+	sc.Step(`^"([^"]*)" tries to connect to the game websocket without joining$`, triesToConnectWithoutJoining)
+	sc.Step(`^someone tries to connect to the game websocket with client id "([^"]*)"$`, someoneTriesToConnectWithClientID)
+	sc.Step(`^the websocket connection should be rejected with status (\d+)$`, theWebsocketConnectionShouldBeRejectedWithStatus)
 	sc.Step(`^the admin starts the game$`, theAdminStartsTheGame)
 	sc.Step(`^starting the game should fail with status (\d+)$`, startingTheGameShouldFailWithStatus)
 	sc.Step(`^the admin advances to the next question$`, theAdminAdvancesToTheNextQuestion)
@@ -123,8 +137,12 @@ func InitializeScenario(sc *godog.ScenarioContext, env *environment) {
 	sc.Step(`^"([^"]*)" answers with an option on a free-text question$`, answersWithANonexistentOption)
 	sc.Step(`^"([^"]*)" submits free text on a multiple choice question$`, submitsFreeTextOnAMultipleChoiceQuestion)
 	sc.Step(`^the admin grades a nonexistent answer, expecting status (\d+)$`, theAdminGradesANonexistentAnswer)
+	sc.Step(`^"([^"]*)" sends a message of unknown type$`, sendsUnknownMessageType)
+	sc.Step(`^"([^"]*)" sends a malformed answer\.submit payload$`, sendsMalformedAnswerSubmitPayload)
+	sc.Step(`^"([^"]*)" answers before the game starts$`, answersBeforeGameStarts)
 
 	sc.Step(`^"([^"]*)" should receive (?:a|an) "([^"]*)" message$`, shouldReceiveAMessage)
+	sc.Step(`^"([^"]*)" should receive a "question\.ended" message with (\d+) correct responses?$`, shouldReceiveQuestionEndedWithNCorrectResponses)
 	sc.Step(`^"([^"]*)" should receive a "question\.started" message with timed (true|false)$`, shouldReceiveQuestionStartedWithTimed)
 	sc.Step(`^"([^"]*)" should receive a "question\.started" message with your answer pending$`, shouldReceiveQuestionStartedWithYourAnswerPending)
 	sc.Step(`^"([^"]*)" should receive a "question\.started" message with your answer graded (correct|incorrect) and (\d+) points$`, shouldReceiveQuestionStartedWithYourAnswerGraded)
@@ -223,6 +241,37 @@ func iTryToUploadMediaAsAUserWithoutTheAdminRole(ctx context.Context) error {
 		return err
 	}
 	resp, err := w.uploadMediaAs(ctx, fakeMediaPath(w), token, "test.png", "image/png", []byte("x"))
+	w.lastResponse = resp
+	return err
+}
+
+// DeleteQuestionMedia checks Authorization itself too (see
+// internal/question/handler_media.go), the same as UploadQuestionMedia
+// above, but it's a separate code path with its own RequireAdminToken
+// call — worth covering on its own rather than assuming upload's coverage
+// extends to it.
+
+func iTryToDeleteMediaWithNoBearerToken(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.request(ctx, http.MethodDelete, fakeMediaPath(w), "", "", nil)
+	w.lastResponse = resp
+	return err
+}
+
+func iTryToDeleteMediaWithAnInvalidBearerToken(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.request(ctx, http.MethodDelete, fakeMediaPath(w), invalidBearerToken, "", nil)
+	w.lastResponse = resp
+	return err
+}
+
+func iTryToDeleteMediaAsAUserWithoutTheAdminRole(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	token, err := w.env.noRoleToken(ctx)
+	if err != nil {
+		return err
+	}
+	resp, err := w.request(ctx, http.MethodDelete, fakeMediaPath(w), token, "", nil)
 	w.lastResponse = resp
 	return err
 }
@@ -595,6 +644,81 @@ func gettingAnUnknownQuizShouldFailWithStatus(ctx context.Context, want int) err
 	return nil
 }
 
+func updatingAnUnknownQuizShouldFail(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodPatch, path, map[string]any{"title": "New Title"})
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d updating an unknown quiz, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func deletingAnUnknownQuizShouldFail(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s", uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d deleting an unknown quiz, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func updatingAnUnknownQuestionShouldFail(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodPatch, path, map[string]any{"prompt": "New Prompt"})
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d updating an unknown question, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+func deletingAnUnknownQuestionShouldFail(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, uuid.NewString())
+	resp, err := w.adminRequest(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d deleting an unknown question, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
+// gettingQuestionThroughWrongQuizShouldFail looks up prompt's question id
+// (created under whatever quiz was current at the time) but requests it
+// under w.quizID as it stands *now* — the caller is expected to have
+// since switched to a different quiz, so this exercises GetQuestion's
+// (quizId, questionId) scoping: a real question id that just doesn't
+// belong to the quiz in the URL should 404 the same as a made-up one.
+func gettingQuestionThroughWrongQuizShouldFail(ctx context.Context, prompt string, want int) error {
+	w := worldFromContext(ctx)
+	qr, ok := w.questions[prompt]
+	if !ok {
+		return fmt.Errorf("question %q was never created", prompt)
+	}
+	path := fmt.Sprintf("/admin/quizzes/%s/questions/%s", w.quizID, qr.id)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Status != want {
+		return fmt.Errorf("expected status %d getting a question through the wrong quiz, got %d: %v", want, resp.Status, resp.Body)
+	}
+	return nil
+}
+
 func theQuizListShouldInclude(ctx context.Context, titleA, titleB string) error {
 	w := worldFromContext(ctx)
 	resp, err := w.adminRequest(ctx, http.MethodGet, "/admin/quizzes", nil)
@@ -906,6 +1030,13 @@ func iCreateAGameForTheQuiz(ctx context.Context) error {
 	return nil
 }
 
+func iTryToCreateAGameForAnUnknownQuiz(ctx context.Context) error {
+	w := worldFromContext(ctx)
+	resp, err := w.adminRequest(ctx, http.MethodPost, "/admin/games", map[string]any{"quizId": uuid.NewString()})
+	w.lastResponse = resp
+	return err
+}
+
 func joinsTheGame(ctx context.Context, nickname string) error {
 	w := worldFromContext(ctx)
 	return doJoin(ctx, w, nickname, w.gameCode)
@@ -984,6 +1115,35 @@ func shouldBeShownToTheAdminWithColor(ctx context.Context, nickname, wantColor s
 		if player["clientId"] == p.clientID {
 			if got := player["color"]; got != wantColor {
 				return fmt.Errorf("expected color %q for %q, got %v", wantColor, nickname, got)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no admin roster entry for %q", nickname)
+}
+
+// theAdminShouldSeeAsConnected checks GetGame's per-player "connected"
+// field (backed by ws.Hub.ConnectedClientIDs) — separate from whether the
+// player has joined at all (playerCount), this is specifically whether
+// their websocket is currently open.
+func theAdminShouldSeeAsConnected(ctx context.Context, nickname, wantWord string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	want := wantWord == "connected"
+	path := fmt.Sprintf("/admin/games/%s", w.gameID)
+	resp, err := w.adminRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	for _, raw := range resp.Body["players"].([]any) {
+		player := raw.(map[string]any)
+		if player["clientId"] == p.clientID {
+			got, _ := player["connected"].(bool)
+			if got != want {
+				return fmt.Errorf("expected connected=%v for %q, got %v", want, nickname, got)
 			}
 			return nil
 		}
@@ -1115,6 +1275,67 @@ func disconnects(ctx context.Context, nickname string) error {
 		return fmt.Errorf("player %q isn't connected", nickname)
 	}
 	return p.conn.CloseNow()
+}
+
+// websocketConnectionShouldBeClosed waits for p.closed (see world.go) to
+// close — proof the connection was actually torn down server-side (e.g.
+// by Hub.CloseRoom after its game's quiz was deleted), not just that some
+// message arrived beforehand.
+func websocketConnectionShouldBeClosed(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	if p.closed == nil {
+		return fmt.Errorf("player %q was never connected", nickname)
+	}
+	select {
+	case <-p.closed:
+		return nil
+	case <-time.After(defaultWaitTimeout):
+		return fmt.Errorf("expected %q's websocket connection to be closed, but it's still open", nickname)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// triesToConnectWithoutJoining attempts the websocket handshake with a
+// freshly-minted client_id that was never used to join the game via POST
+// /games/join — Hub.Upgrade should reject it (no matching player row)
+// before ever completing the upgrade.
+func triesToConnectWithoutJoining(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	clientID := w.newClientID()
+	w.players[nickname] = newPlayer(nickname, clientID)
+	return attemptWebsocketDial(ctx, w, w.gameCode, clientID)
+}
+
+// someoneTriesToConnectWithClientID attempts the handshake with a raw,
+// possibly-malformed client_id string — Hub.Upgrade should reject
+// anything that doesn't parse as a UUID before looking up a player at
+// all.
+func someoneTriesToConnectWithClientID(ctx context.Context, clientID string) error {
+	w := worldFromContext(ctx)
+	return attemptWebsocketDial(ctx, w, w.gameCode, clientID)
+}
+
+func attemptWebsocketDial(ctx context.Context, w *World, gameCode, clientID string) error {
+	conn, status, err := dialGameWebsocket(ctx, w, gameCode, clientID)
+	if err == nil {
+		conn.CloseNow()
+		return fmt.Errorf("expected the websocket handshake to be rejected, but it succeeded")
+	}
+	w.lastWSStatus = status
+	return nil
+}
+
+func theWebsocketConnectionShouldBeRejectedWithStatus(ctx context.Context, want int) error {
+	w := worldFromContext(ctx)
+	if w.lastWSStatus != want {
+		return fmt.Errorf("expected websocket rejection status %d, got %d", want, w.lastWSStatus)
+	}
+	return nil
 }
 
 func theAdminStartsTheGame(ctx context.Context) error {
@@ -1271,6 +1492,43 @@ func shouldReceiveAMessage(ctx context.Context, nickname, msgType string) error 
 	return err
 }
 
+// shouldReceiveQuestionEndedWithNCorrectResponses checks question.ended's
+// actual payload — that it carries a real correctOptionId and that the
+// answerCounts histogram attributes the expected number of responses to
+// it — rather than just that advancing succeeded. It deliberately doesn't
+// resolve the correct option by text against currentQuestion: by the
+// time this fires, the next question.started may have already arrived on
+// the same connection and overwritten it, which would make that lookup
+// racy against the read loop.
+func shouldReceiveQuestionEndedWithNCorrectResponses(ctx context.Context, nickname string, want int) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	env, err := p.waitFor(ctx, ws.TypeQuestionEnded, defaultWaitTimeout)
+	if err != nil {
+		return err
+	}
+	var qe ws.QuestionEnded
+	if err := json.Unmarshal(env.Payload, &qe); err != nil {
+		return err
+	}
+	if qe.CorrectOptionID == nil {
+		return fmt.Errorf("expected question.ended to include a correctOptionId, got nil")
+	}
+	var got int64
+	for _, ac := range qe.AnswerCounts {
+		if ac.OptionID == *qe.CorrectOptionID {
+			got = ac.Count
+		}
+	}
+	if int(got) != want {
+		return fmt.Errorf("expected %d response(s) for the correct option, got %d (counts: %+v)", want, got, qe.AnswerCounts)
+	}
+	return nil
+}
+
 func shouldReceiveQuestionStartedWithTimed(ctx context.Context, nickname, wantTimedStr string) error {
 	w := worldFromContext(ctx)
 	p, ok := w.players[nickname]
@@ -1416,6 +1674,58 @@ func sendAnswerSubmitPayload(ctx context.Context, p *player, payload map[string]
 		return err
 	}
 	return p.conn.Write(ctx, websocket.MessageText, envRaw)
+}
+
+// sendsUnknownMessageType sends a well-formed envelope whose "type" isn't
+// one Hub.handleMessage recognizes at all — the default case of its
+// switch, distinct from a malformed *known* message type.
+func sendsUnknownMessageType(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	env := wsEnvelope{Type: "not.a.real.message.type", Payload: json.RawMessage(`{}`)}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return p.conn.Write(ctx, websocket.MessageText, raw)
+}
+
+// sendsMalformedAnswerSubmitPayload sends an answer.submit envelope whose
+// payload isn't the expected object shape at all (a bare string) —
+// json.Unmarshal into AnswerSubmit fails outright, distinct from a
+// well-formed payload carrying invalid ids (see
+// answersWithAMismatchedQuestionID and answersWithANonexistentOption).
+func sendsMalformedAnswerSubmitPayload(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	env := wsEnvelope{Type: ws.TypeAnswerSubmit, Payload: json.RawMessage(`"not an object"`)}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return p.conn.Write(ctx, websocket.MessageText, raw)
+}
+
+// answersBeforeGameStarts submits an answer while the game is still in
+// the lobby — SubmitAnswer rejects on game status before it ever looks at
+// the question/option ids, so the ids here don't need to resolve to
+// anything real.
+func answersBeforeGameStarts(ctx context.Context, nickname string) error {
+	w := worldFromContext(ctx)
+	p, ok := w.players[nickname]
+	if !ok {
+		return fmt.Errorf("player %q hasn't joined the game yet", nickname)
+	}
+	return sendAnswerSubmitPayload(ctx, p, map[string]string{
+		"questionId": uuid.NewString(),
+		"optionId":   uuid.NewString(),
+	})
 }
 
 // answersWithAMismatchedQuestionID sends a syntactically valid answer

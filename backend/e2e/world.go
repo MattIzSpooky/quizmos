@@ -30,6 +30,12 @@ type player struct {
 	clientID string
 
 	conn *websocket.Conn
+	// closed is a fresh channel per connect, closed by the read loop when
+	// it returns (i.e. the connection has actually ended, whether the
+	// client or the server closed it) — lets a step assert a connection
+	// was really torn down server-side (e.g. after deleting its game's
+	// quiz) rather than just that some message arrived.
+	closed chan struct{}
 
 	mu       sync.Mutex
 	messages []wsEnvelope
@@ -198,6 +204,12 @@ type World struct {
 
 	lastResponse apiResponse
 	lastErr      error
+
+	// lastWSStatus is the HTTP status from the most recent rejected
+	// websocket handshake attempt (see dialGameWebsocket) — there's no
+	// apiResponse-shaped body to reuse lastResponse for, since the
+	// rejection happens before any upgrade, let alone JSON.
+	lastWSStatus int
 }
 
 func newWorld(env *environment) *World {
@@ -219,8 +231,10 @@ func (w *World) connectPlayerSocket(ctx context.Context, p *player) error {
 		return fmt.Errorf("dial websocket: %w", err)
 	}
 	p.conn = conn
+	p.closed = make(chan struct{})
 
 	go func() {
+		defer close(p.closed)
 		for {
 			var env wsEnvelope
 			readCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -233,6 +247,21 @@ func (w *World) connectPlayerSocket(ctx context.Context, p *player) error {
 		}
 	}()
 	return nil
+}
+
+// dialGameWebsocket attempts the websocket handshake for gameCode/clientID
+// without registering a player — for asserting Hub.Upgrade's rejection
+// paths (never joined, malformed client_id), where a successful dial
+// would be the test failure. status is the HTTP status the server
+// responded with when the handshake didn't succeed (0 if no response was
+// received at all, e.g. a connection-level failure).
+func dialGameWebsocket(ctx context.Context, w *World, gameCode, clientID string) (conn *websocket.Conn, status int, err error) {
+	url := fmt.Sprintf("%s/games/%s?client_id=%s", w.env.wsBaseURL, gameCode, clientID)
+	conn, resp, err := websocket.Dial(ctx, url, nil)
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	return conn, status, err
 }
 
 func (w *World) closeAllSockets() {

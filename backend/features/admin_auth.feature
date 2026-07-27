@@ -36,3 +36,15 @@ Feature: Admin endpoint authentication and authorization
   Scenario: Uploading question media as a user without the admin role is rejected
     When I try to upload media as a user without the admin role
     Then the request should fail with status 403
+
+  Scenario: Deleting question media with no bearer token is rejected
+    When I try to delete media with no bearer token
+    Then the request should fail with status 401
+
+  Scenario: Deleting question media with an invalid bearer token is rejected
+    When I try to delete media with an invalid bearer token
+    Then the request should fail with status 401
+
+  Scenario: Deleting question media as a user without the admin role is rejected
+    When I try to delete media as a user without the admin role
+    Then the request should fail with status 403

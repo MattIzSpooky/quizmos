@@ -120,8 +120,43 @@ Feature: Quiz authoring
     And getting the game should fail with status 404
     And the previously uploaded media should no longer be reachable
 
+  Scenario: Deleting a quiz disconnects any player still connected to a game played from it
+    Given a quiz titled "General Knowledge"
+    And a multiple choice question "What is 2 + 2?" with options:
+      | text | correct |
+      | 3    | false   |
+      | 4    | true    |
+    And I create a game for the quiz
+    And "Alice" joins the game
+    And "Alice" connects to the game websocket
+    When I delete the quiz
+    Then "Alice"'s websocket connection should be closed
+
   Scenario: Getting a quiz that doesn't exist fails
     Then getting an unknown quiz should fail with status 404
+
+  Scenario: Updating a quiz that doesn't exist fails
+    Then updating an unknown quiz should fail with status 404
+
+  Scenario: Deleting a quiz that doesn't exist fails
+    Then deleting an unknown quiz should fail with status 404
+
+  Scenario: Updating a question that doesn't exist fails
+    Given a quiz titled "General Knowledge"
+    Then updating an unknown question should fail with status 404
+
+  Scenario: Deleting a question that doesn't exist fails
+    Given a quiz titled "General Knowledge"
+    Then deleting an unknown question should fail with status 404
+
+  Scenario: Getting a question through the wrong quiz fails
+    Given a quiz titled "Quiz A"
+    And a multiple choice question "Q" with options:
+      | text | correct |
+      | A    | true    |
+      | B    | false   |
+    And a quiz titled "Quiz B"
+    Then getting "Q" through the wrong quiz should fail with status 404
 
   Scenario: Listing quizzes includes ones I've created
     Given a quiz titled "Alpha Quiz"

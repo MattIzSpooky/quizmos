@@ -85,3 +85,36 @@ Feature: Live gameplay over the websocket
     Given the admin starts the game
     When the admin ends the game
     Then "Alice" should receive a "game.ended" message
+
+  Scenario: A second player connecting is announced to those already in the room
+    When "Bob" joins the game
+    And "Bob" connects to the game websocket
+    Then "Alice" should receive a "presence.playerJoined" message
+
+  Scenario: A player disconnecting is announced to those still in the room
+    Given "Bob" joins the game
+    And "Bob" connects to the game websocket
+    And "Alice" should receive a "presence.playerJoined" message
+    When "Bob" disconnects
+    Then "Alice" should receive a "presence.playerLeft" message
+
+  Scenario: Advancing broadcasts the ended question's correct answer and response count
+    Given the admin starts the game
+    And "Alice" answers "4"
+    And "Alice" should receive an "answer.result" message with correct true and 100 points
+    When the admin advances to the next question
+    Then "Alice" should receive a "question.ended" message with 1 correct response
+
+  Scenario: Sending an unrecognized message type is rejected
+    Given the admin starts the game
+    When "Alice" sends a message of unknown type
+    Then "Alice" should receive an "error" message
+
+  Scenario: Sending a malformed answer.submit payload is rejected
+    Given the admin starts the game
+    When "Alice" sends a malformed answer.submit payload
+    Then "Alice" should receive an "error" message
+
+  Scenario: Answering before the game has started is rejected
+    When "Alice" answers before the game starts
+    Then "Alice" should receive an "error" message

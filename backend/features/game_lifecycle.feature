@@ -96,3 +96,14 @@ Feature: Game lifecycle
   Scenario: Kicking a player who never joined fails
     Given I create a game for the quiz
     Then kicking a player who never joined should fail with status 404
+
+  Scenario: The admin sees a player as connected once their websocket is open
+    Given I create a game for the quiz
+    And "Alice" joins the game
+    Then the admin should see "Alice" as not connected
+    When "Alice" connects to the game websocket
+    Then the admin should see "Alice" as connected
+
+  Scenario: Creating a game for a quiz that doesn't exist fails
+    When I try to create a game for an unknown quiz
+    Then the request should fail with status 404
