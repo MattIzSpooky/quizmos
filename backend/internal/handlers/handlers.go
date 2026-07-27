@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mattizspooky/quizmos/backend/internal/auth"
 	"github.com/mattizspooky/quizmos/backend/internal/game"
 	"github.com/mattizspooky/quizmos/backend/internal/question"
 	"github.com/mattizspooky/quizmos/backend/internal/quiz"
@@ -51,4 +52,12 @@ const (
 func logGameAction(ctx context.Context, action string, gameID uuid.UUID, actorType, actorID string, extra ...any) {
 	args := append([]any{"action", action, "game.id", gameID, "actor.type", actorType, "actor.id", actorID}, extra...)
 	slog.InfoContext(ctx, "game.action", args...)
+}
+
+// logQuizAction mirrors logGameAction (see its doc comment) for quiz
+// mutations. Quiz authoring is admin-only — nothing a player does ever
+// mutates a quiz — so unlike logGameAction there's no actor type to vary.
+func logQuizAction(ctx context.Context, action string, quizID uuid.UUID, extra ...any) {
+	args := append([]any{"action", action, "quiz.id", quizID, "actor.type", actorAdmin, "actor.id", auth.Actor(ctx)}, extra...)
+	slog.InfoContext(ctx, "quiz.action", args...)
 }

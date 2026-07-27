@@ -22,6 +22,7 @@ func (h *Handlers) CreateQuiz(ctx context.Context, req api.CreateQuizRequestObje
 	if err != nil {
 		return nil, err
 	}
+	logQuizAction(ctx, "quiz.created", q.ID, "title", req.Body.Title)
 	return api.CreateQuiz201JSONResponse(quizToAPI(q)), nil
 }
 
@@ -56,6 +57,7 @@ func (h *Handlers) UpdateQuiz(ctx context.Context, req api.UpdateQuizRequestObje
 		}
 		return nil, err
 	}
+	logQuizAction(ctx, "quiz.updated", q.ID)
 	return api.UpdateQuiz200JSONResponse(quizToAPI(q)), nil
 }
 
@@ -67,6 +69,7 @@ func (h *Handlers) DeleteQuiz(ctx context.Context, req api.DeleteQuizRequestObje
 		}
 		return nil, err
 	}
+	logQuizAction(ctx, "quiz.deleted", req.QuizId, "games_closed", len(gameIDs))
 	// Any game played from this quiz is gone too now — disconnect anyone
 	// still connected to its room rather than leaving them hanging on a
 	// game that no longer exists.
