@@ -2,7 +2,7 @@
 // api/asyncapi.yaml: one hub keyed by game ID, one room per game, one
 // client per connected player. REST admin handlers call the Broadcast*
 // methods after mutating game state; the room never mutates state itself
-// except via Service.SubmitAnswer on answer.submit.
+// except via game.Service.SubmitAnswer on answer.submit.
 package ws
 
 import (
@@ -25,8 +25,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
 	"github.com/mattizspooky/quizmos/backend/internal/middleware"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
+	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 )
 
 // tracer and meter are safe to use before telemetry.Setup runs: otel.Tracer
@@ -65,7 +67,7 @@ type room struct {
 	// reviewing tracks "we're currently showing a read-only recap of
 	// this question index" — set on question.reviewed, cleared on the
 	// next real question.started. ReviewQuestion itself never touches
-	// the database (see service.ReviewQuestion), so this in-memory flag
+	// the database (see game.Service.ReviewQuestion), so this in-memory flag
 	// is the *only* record that a recap is in progress; without it, a
 	// player who reconnects mid-recap would catch up to live play
 	// instead of whatever's actually on everyone else's screen.
@@ -73,7 +75,8 @@ type room struct {
 }
 
 type Hub struct {
-	svc *service.Service
+	games   *game.Service
+	quizzes *quiz.Service
 
 	mu    sync.RWMutex
 	rooms map[uuid.UUID]*room
@@ -81,8 +84,8 @@ type Hub struct {
 	AllowedOrigins []string
 }
 
-func NewHub(svc *service.Service, allowedOrigins []string) *Hub {
-	return &Hub{svc: svc, rooms: make(map[uuid.UUID]*room), AllowedOrigins: allowedOrigins}
+func NewHub(games *game.Service, quizzes *quiz.Service, allowedOrigins []string) *Hub {
+	return &Hub{games: games, quizzes: quizzes, rooms: make(map[uuid.UUID]*room), AllowedOrigins: allowedOrigins}
 }
 
 func (h *Hub) roomFor(gameID uuid.UUID) *room {
@@ -108,7 +111,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	game, player, err := h.svc.GetPlayerByCode(r.Context(), code, clientID)
+	g, player, err := h.games.GetPlayerByCode(r.Context(), code, clientID)
 	if err != nil {
 		http.Error(w, "no such player in this game; join via POST /api/games/join first", http.StatusForbidden)
 		return
@@ -121,7 +124,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 
 	connID := trace.SpanContextFromContext(r.Context()).TraceID().String()
 	c := &client{clientID: clientID, nickname: player.Nickname, conn: conn, send: make(chan Envelope, 16), connID: connID}
-	rm := h.roomFor(game.ID)
+	rm := h.roomFor(g.ID)
 
 	rm.mu.Lock()
 	rm.clients[clientID] = c
@@ -130,7 +133,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 	rm.mu.Unlock()
 
 	slog.InfoContext(r.Context(), "ws.connect",
-		"ws.connection_id", connID, "game.id", game.ID, "client.id", clientID, "nickname", player.Nickname)
+		"ws.connection_id", connID, "game.id", g.ID, "client.id", clientID, "nickname", player.Nickname)
 	wsConnectionsActive.Add(r.Context(), 1)
 
 	ctx, cancel := context.WithCancel(r.Context())
@@ -142,9 +145,9 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 		Player:      PlayerSummary{ClientID: clientID.String(), Nickname: player.Nickname},
 		PlayerCount: int64(count),
 	})
-	h.sendCatchUp(ctx, game, c, reviewing)
+	h.sendCatchUp(ctx, g, c, reviewing)
 
-	h.readLoop(ctx, game.ID, c)
+	h.readLoop(ctx, g.ID, c)
 
 	rm.mu.Lock()
 	delete(rm.clients, clientID)
@@ -153,7 +156,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 	close(c.send)
 
 	slog.InfoContext(ctx, "ws.disconnect",
-		"ws.connection_id", connID, "game.id", game.ID, "client.id", clientID)
+		"ws.connection_id", connID, "game.id", g.ID, "client.id", clientID)
 	wsConnectionsActive.Add(ctx, -1)
 
 	h.broadcastToRoom(rm, TypePresencePlayerLeft, PresencePlayerLeft{
@@ -172,9 +175,9 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 // it takes priority over live play, so someone reconnecting mid-recap
 // sees the same read-only question everyone else on screen sees, not
 // whatever question is actually live underneath it.
-func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewingIndex *int) {
-	if game.Status == "in_progress" && reviewingIndex != nil {
-		if result, err := h.svc.ReviewQuestion(ctx, game.ID, *reviewingIndex); err == nil {
+func (h *Hub) sendCatchUp(ctx context.Context, g db.Game, c *client, reviewingIndex *int) {
+	if g.Status == "in_progress" && reviewingIndex != nil {
+		if result, err := h.games.ReviewQuestion(ctx, g.ID, *reviewingIndex); err == nil {
 			h.sendTo(c, TypeQuestionReviewed, questionReviewedPayload(result.Question, result.Game.TotalQuestions, result.AnswerCounts))
 			return
 		}
@@ -183,32 +186,32 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 		// showing the live question is still better than showing nothing.
 	}
 
-	switch game.Status {
+	switch g.Status {
 	case "in_progress":
-		if !game.CurrentQuestionIndex.Valid {
+		if !g.CurrentQuestionIndex.Valid {
 			return
 		}
-		quiz, err := h.svc.GetQuiz(ctx, game.QuizID)
+		qz, err := h.quizzes.Get(ctx, g.QuizID)
 		if err != nil {
 			return
 		}
-		question, total, err := h.svc.QuestionAtIndex(ctx, game.QuizID, int(game.CurrentQuestionIndex.Int32))
+		q, total, err := h.games.QuestionAtIndex(ctx, g.QuizID, int(g.CurrentQuestionIndex.Int32))
 		if err != nil {
 			return
 		}
-		options := make([]QuestionOption, len(question.Options))
-		for i, o := range question.Options {
+		options := make([]QuestionOption, len(q.Options))
+		for i, o := range q.Options {
 			options[i] = QuestionOption{ID: o.ID.String(), Text: o.Text}
 		}
-		mediaURL, mediaType := mediaFields(question)
+		mediaURL, mediaType := mediaFields(q)
 		payload := QuestionStarted{
-			QuestionIndex:    int64(question.Position),
-			QuestionID:       question.ID.String(),
-			Type:             Type(question.Type),
-			Prompt:           question.Prompt,
+			QuestionIndex:    int64(q.Position),
+			QuestionID:       q.ID.String(),
+			Type:             Type(q.Type),
+			Prompt:           q.Prompt,
 			Options:          options,
-			Timed:            quiz.Timed,
-			TimeLimitSeconds: int64(question.TimeLimitSeconds),
+			Timed:            qz.Timed,
+			TimeLimitSeconds: int64(q.TimeLimitSeconds),
 			TotalQuestions:   int64(total),
 			MediaURL:         mediaURL,
 			MediaType:        mediaType,
@@ -217,12 +220,12 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 		// already have answered this exact question — without folding
 		// that in, they'd see a blank, re-answerable question and a
 		// resubmission would be silently rejected as a duplicate.
-		if status, err := h.svc.GetPlayerAnswerStatus(ctx, game.ID, c.clientID, question.ID); err == nil {
+		if status, err := h.games.GetPlayerAnswerStatus(ctx, g.ID, c.clientID, q.ID); err == nil {
 			applyYourAnswer(&payload, status)
 		}
 		h.sendTo(c, TypeQuestionStarted, payload)
 	case "ended":
-		leaderboard, err := h.svc.Leaderboard(ctx, game.ID)
+		leaderboard, err := h.games.Leaderboard(ctx, g.ID)
 		if err != nil {
 			return
 		}
@@ -236,14 +239,14 @@ func (h *Hub) sendCatchUp(ctx context.Context, game db.Game, c *client, reviewin
 				Color:    Color(e.Color),
 			}
 		}
-		h.sendTo(c, TypeGameEnded, GameEnded{FinalLeaderboard: entries, EndedAt: game.EndedAt.Time})
+		h.sendTo(c, TypeGameEnded, GameEnded{FinalLeaderboard: entries, EndedAt: g.EndedAt.Time})
 	}
 }
 
 // mediaFields mirrors handlers.mediaFields — kept as its own small copy
 // here (rather than exported and shared) since handlers already imports
 // ws, and having ws import handlers back would be a cycle.
-func mediaFields(q service.QuestionWithOptions) (*string, *MediaType) {
+func mediaFields(q question.WithOptions) (*string, *MediaType) {
 	if q.MediaURL == "" {
 		return nil, nil
 	}
@@ -256,7 +259,7 @@ func mediaFields(q service.QuestionWithOptions) (*string, *MediaType) {
 // as its own small copy here (rather than exported and shared) since
 // handlers already imports ws, and having ws import handlers back would
 // be a cycle.
-func questionReviewedPayload(q service.QuestionWithOptions, total int, counts map[uuid.UUID]int) QuestionReviewed {
+func questionReviewedPayload(q question.WithOptions, total int, counts map[uuid.UUID]int) QuestionReviewed {
 	options := make([]QuestionOption, len(q.Options))
 	var correctID *string
 	answerCounts := make([]AnswerCount, 0, len(q.Options))
@@ -377,7 +380,7 @@ func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *clien
 		optionID = &id
 	}
 
-	result, err := h.svc.SubmitAnswer(ctx, gameID, c.clientID, questionID, optionID, submit.Text)
+	result, err := h.games.SubmitAnswer(ctx, gameID, c.clientID, questionID, optionID, submit.Text)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		span.RecordError(err)
@@ -582,7 +585,7 @@ func (h *Hub) BroadcastQuestionStarted(ctx context.Context, gameID uuid.UUID, ba
 
 	for _, c := range clients {
 		payload := base
-		if status, err := h.svc.GetPlayerAnswerStatus(ctx, gameID, c.clientID, questionID); err == nil {
+		if status, err := h.games.GetPlayerAnswerStatus(ctx, gameID, c.clientID, questionID); err == nil {
 			applyYourAnswer(&payload, status)
 		}
 		h.sendTo(c, TypeQuestionStarted, payload)
@@ -591,7 +594,7 @@ func (h *Hub) BroadcastQuestionStarted(ctx context.Context, gameID uuid.UUID, ba
 
 // applyYourAnswer folds a player's existing answer (if any) into their
 // copy of a question.started payload.
-func applyYourAnswer(payload *QuestionStarted, status service.PlayerAnswerStatus) {
+func applyYourAnswer(payload *QuestionStarted, status game.PlayerAnswerStatus) {
 	if !status.Answered {
 		return
 	}

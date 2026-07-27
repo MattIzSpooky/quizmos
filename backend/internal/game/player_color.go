@@ -1,4 +1,4 @@
-package service
+package game
 
 // PlayerColorIDs is the curated set of cosmos-themed color choices players
 // can pick when joining — deliberately a short, fixed list rather than a

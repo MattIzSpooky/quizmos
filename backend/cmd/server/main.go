@@ -16,9 +16,11 @@ import (
 
 	"github.com/mattizspooky/quizmos/backend/internal/auth"
 	"github.com/mattizspooky/quizmos/backend/internal/config"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
 	"github.com/mattizspooky/quizmos/backend/internal/handlers"
 	"github.com/mattizspooky/quizmos/backend/internal/httpserver"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
+	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 	"github.com/mattizspooky/quizmos/backend/internal/storage"
 	"github.com/mattizspooky/quizmos/backend/internal/telemetry"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
@@ -89,9 +91,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc := service.New(pool, store)
-	hub := ws.NewHub(svc, cfg.AllowedOrigins)
-	handler := handlers.New(svc, hub, keycloak)
+	questionSvc := question.New(pool, store)
+	quizSvc := quiz.New(pool, store, questionSvc)
+	gameSvc := game.New(pool, questionSvc)
+	questionHandler := question.NewHandler(questionSvc, keycloak)
+	hub := ws.NewHub(gameSvc, quizSvc, cfg.AllowedOrigins)
+	handler := handlers.New(gameSvc, quizSvc, questionHandler, hub)
 
 	var shuttingDown atomic.Bool
 	router, err := httpserver.New(httpserver.Options{

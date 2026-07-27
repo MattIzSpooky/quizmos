@@ -1,3 +1,10 @@
+// Package handlers implements api.StrictServerInterface for the game and
+// quiz domains, mapping between service-layer results and generated
+// OpenAPI response types, and triggering websocket broadcasts after
+// game-lifecycle mutations. Question's REST handlers live in
+// internal/question instead (see question.Handler, embedded below) since
+// that domain has no websocket involvement and can safely combine its
+// service and handler layers in one package.
 package handlers
 
 import (
@@ -6,42 +13,26 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mattizspooky/quizmos/backend/internal/auth"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
+	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
-// Handlers implements api.StrictServerInterface. It holds the domain
-// service (persistence + business rules) and the websocket hub (to
-// broadcast the effects of admin mutations to connected players).
+// Handlers implements api.StrictServerInterface. It holds the game and
+// quiz services (persistence + business rules), the websocket hub (to
+// broadcast the effects of admin mutations to connected players), and
+// embeds question.Handler for the question-related methods.
 type Handlers struct {
-	svc      *service.Service
-	hub      *ws.Hub
-	keycloak *auth.Keycloak
+	*question.Handler
+
+	games   *game.Service
+	quizzes *quiz.Service
+	hub     *ws.Hub
 }
 
-func New(svc *service.Service, hub *ws.Hub, keycloak *auth.Keycloak) *Handlers {
-	return &Handlers{svc: svc, hub: hub, keycloak: keycloak}
-}
-
-// adminSubject returns the Keycloak subject of the authenticated caller,
-// used only for the created_by audit column.
-func adminSubject(ctx context.Context) string {
-	if claims, ok := auth.ClaimsFromContext(ctx); ok {
-		return claims.Subject
-	}
-	return ""
-}
-
-// adminActor returns a human-readable identifier for the authenticated
-// admin (their Keycloak username) for use in logGameAction calls — unlike
-// adminSubject, which is the DB's stable but opaque created_by value, this
-// is what actually tells one admin apart from another when reading logs.
-func adminActor(ctx context.Context) string {
-	if claims, ok := auth.ClaimsFromContext(ctx); ok {
-		return claims.DisplayName()
-	}
-	return ""
+func New(games *game.Service, quizzes *quiz.Service, questions *question.Handler, hub *ws.Hub) *Handlers {
+	return &Handlers{Handler: questions, games: games, quizzes: quizzes, hub: hub}
 }
 
 // actorType values for logGameAction's actorType parameter.

@@ -57,6 +57,26 @@ func ClaimsFromContext(ctx context.Context) (AdminClaims, bool) {
 	return claims, ok
 }
 
+// Subject returns the Keycloak subject of the authenticated caller, used
+// only for created_by audit columns.
+func Subject(ctx context.Context) string {
+	if claims, ok := ClaimsFromContext(ctx); ok {
+		return claims.Subject
+	}
+	return ""
+}
+
+// Actor returns a human-readable identifier for the authenticated admin
+// (their Keycloak username) for use in audit log calls — unlike Subject,
+// which is the DB's stable but opaque value, this is what actually tells
+// one admin apart from another when reading logs.
+func Actor(ctx context.Context) string {
+	if claims, ok := ClaimsFromContext(ctx); ok {
+		return claims.DisplayName()
+	}
+	return ""
+}
+
 // Keycloak validates bearer tokens issued by a Keycloak realm.
 type Keycloak struct {
 	issuer    string

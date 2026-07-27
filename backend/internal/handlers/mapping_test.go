@@ -8,14 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
+	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 )
 
 func TestQuizToAPI(t *testing.T) {
 	id := uuid.New()
 	created := pgtype.Timestamptz{Time: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Valid: true}
 
-	quiz := service.QuizWithCount{
+	q := quiz.WithCount{
 		Quiz: db.Quiz{
 			ID:          id,
 			Title:       "General Knowledge",
@@ -26,7 +27,7 @@ func TestQuizToAPI(t *testing.T) {
 		QuestionCount: 3,
 	}
 
-	got := quizToAPI(quiz)
+	got := quizToAPI(q)
 
 	if got.Id != id {
 		t.Errorf("Id = %v, want %v", got.Id, id)
@@ -45,45 +46,12 @@ func TestQuizToAPI(t *testing.T) {
 	}
 }
 
-func TestQuestionToAPI_PreservesOptionOrderAndAnswers(t *testing.T) {
-	q := service.QuestionWithOptions{
-		Question: db.Question{
-			ID:               uuid.New(),
-			QuizID:           uuid.New(),
-			Type:             "multiple_choice",
-			Prompt:           "2+2?",
-			Position:         0,
-			TimeLimitSeconds: 30,
-			Points:           1000,
-		},
-		Options: []db.QuestionOption{
-			{ID: uuid.New(), Text: "3", IsCorrect: false, Position: 0},
-			{ID: uuid.New(), Text: "4", IsCorrect: true, Position: 1},
-		},
-	}
-
-	got := questionToAPI(q)
-
-	if got.Prompt != "2+2?" {
-		t.Errorf("Prompt = %q, want %q", got.Prompt, "2+2?")
-	}
-	if len(got.Options) != 2 {
-		t.Fatalf("len(Options) = %d, want 2", len(got.Options))
-	}
-	if got.Options[0].Text != "3" || got.Options[0].IsCorrect {
-		t.Errorf("Options[0] = %+v, want text=3 isCorrect=false", got.Options[0])
-	}
-	if got.Options[1].Text != "4" || !got.Options[1].IsCorrect {
-		t.Errorf("Options[1] = %+v, want text=4 isCorrect=true", got.Options[1])
-	}
-}
-
 func TestGameDetailToAPI_MarksConnectedPlayers(t *testing.T) {
 	aliceID := uuid.New()
 	bobID := uuid.New()
 
-	detail := service.GameDetail{
-		GameSummary: service.GameSummary{
+	detail := game.Detail{
+		Summary: game.Summary{
 			Game:           db.Game{ID: uuid.New(), Code: "ABC123", Status: "lobby"},
 			QuizTitle:      "General Knowledge",
 			TotalQuestions: 2,
@@ -113,7 +81,7 @@ func TestGameDetailToAPI_MarksConnectedPlayers(t *testing.T) {
 }
 
 func TestLeaderboardToAPI_PreservesRankOrder(t *testing.T) {
-	entries := []service.LeaderboardEntry{
+	entries := []game.LeaderboardEntry{
 		{ClientID: uuid.New(), Nickname: "Alice", Score: 200, Rank: 1},
 		{ClientID: uuid.New(), Nickname: "Bob", Score: 100, Rank: 2},
 	}

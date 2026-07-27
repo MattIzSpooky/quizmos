@@ -5,14 +5,21 @@ import (
 	"errors"
 
 	"github.com/mattizspooky/quizmos/backend/internal/api"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/auth"
+	"github.com/mattizspooky/quizmos/backend/internal/core"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
+// notFoundAnswer covers GradeAnswer's 404 case, which can mean either an
+// unknown game or an unknown/non-free-text answer.
+func notFoundAnswer() api.NotFoundJSONResponse {
+	return api.NotFoundJSONResponse(apiError("not_found", "question or answer not found"))
+}
+
 func (h *Handlers) ListFreeTextAnswers(ctx context.Context, req api.ListFreeTextAnswersRequestObject) (api.ListFreeTextAnswersResponseObject, error) {
-	answers, err := h.svc.ListFreeTextAnswers(ctx, req.GameId, req.QuestionId)
+	answers, err := h.games.ListFreeTextAnswers(ctx, req.GameId, req.QuestionId)
 	if err != nil {
-		if errors.Is(err, service.ErrNotFound) {
+		if errors.Is(err, core.ErrNotFound) {
 			return api.ListFreeTextAnswers404JSONResponse{NotFoundJSONResponse: notFoundGame()}, nil
 		}
 		return nil, err
@@ -25,14 +32,14 @@ func (h *Handlers) ListFreeTextAnswers(ctx context.Context, req api.ListFreeText
 }
 
 func (h *Handlers) GradeAnswer(ctx context.Context, req api.GradeAnswerRequestObject) (api.GradeAnswerResponseObject, error) {
-	graded, err := h.svc.GradeAnswer(ctx, req.GameId, req.AnswerId, req.Body.Correct)
+	graded, err := h.games.GradeAnswer(ctx, req.GameId, req.AnswerId, req.Body.Correct)
 	if err != nil {
-		if errors.Is(err, service.ErrNotFound) {
-			return api.GradeAnswer404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
+		if errors.Is(err, core.ErrNotFound) {
+			return api.GradeAnswer404JSONResponse{NotFoundJSONResponse: notFoundAnswer()}, nil
 		}
 		return nil, err
 	}
-	logGameAction(ctx, "game.answer_graded", req.GameId, actorAdmin, adminActor(ctx),
+	logGameAction(ctx, "game.answer_graded", req.GameId, actorAdmin, auth.Actor(ctx),
 		"target.client_id", graded.ClientID, "question.id", graded.QuestionID, "correct", graded.Correct, "points_awarded", graded.PointsAwarded)
 
 	// Tell the grader's own player their final verdict — they only ever
@@ -45,7 +52,7 @@ func (h *Handlers) GradeAnswer(ctx context.Context, req api.GradeAnswerRequestOb
 		Pending:       false,
 	})
 
-	leaderboard, err := h.svc.Leaderboard(ctx, req.GameId)
+	leaderboard, err := h.games.Leaderboard(ctx, req.GameId)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +61,7 @@ func (h *Handlers) GradeAnswer(ctx context.Context, req api.GradeAnswerRequestOb
 		Entries:       leaderboardEntriesPayload(leaderboard),
 	})
 
-	answers, err := h.svc.ListFreeTextAnswers(ctx, req.GameId, graded.QuestionID)
+	answers, err := h.games.ListFreeTextAnswers(ctx, req.GameId, graded.QuestionID)
 	if err != nil {
 		return nil, err
 	}

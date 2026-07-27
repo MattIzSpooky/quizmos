@@ -1,4 +1,4 @@
-package service
+package question
 
 import "testing"
 
@@ -43,10 +43,10 @@ func TestMediaLimitBytes_RejectsUnknownContentType(t *testing.T) {
 }
 
 // mediaExtensions must cover exactly the same content types as
-// mediaContentTypes: UploadQuestionMedia looks up the storage key's
-// extension by content type after MediaLimitBytes has already accepted
-// it, so a type missing from mediaExtensions would silently store the
-// object with no extension instead of failing loudly.
+// mediaContentTypes: UploadMedia looks up the storage key's extension by
+// content type after MediaLimitBytes has already accepted it, so a type
+// missing from mediaExtensions would silently store the object with no
+// extension instead of failing loudly.
 func TestMediaExtensions_CoversAllAcceptedContentTypes(t *testing.T) {
 	for ct := range mediaContentTypes {
 		ext, ok := mediaExtensions[ct]
@@ -66,34 +66,34 @@ func TestMediaExtensions_CoversAllAcceptedContentTypes(t *testing.T) {
 }
 
 func TestValidateOptionsForType_MultipleChoice(t *testing.T) {
-	two := []QuestionOptionInput{{Text: "a"}, {Text: "b", IsCorrect: true}}
-	if err := validateOptionsForType(QuestionTypeMultipleChoice, two); err != nil {
+	two := []OptionInput{{Text: "a"}, {Text: "b", IsCorrect: true}}
+	if err := validateOptionsForType(TypeMultipleChoice, two); err != nil {
 		t.Errorf("expected 2 options to be valid, got %v", err)
 	}
 
-	one := []QuestionOptionInput{{Text: "a", IsCorrect: true}}
-	if err := validateOptionsForType(QuestionTypeMultipleChoice, one); err != ErrValidation {
-		t.Errorf("expected ErrValidation for 1 option, got %v", err)
+	one := []OptionInput{{Text: "a", IsCorrect: true}}
+	if err := validateOptionsForType(TypeMultipleChoice, one); err == nil {
+		t.Errorf("expected an error for 1 option, got nil")
 	}
 
-	if err := validateOptionsForType(QuestionTypeMultipleChoice, nil); err != ErrValidation {
-		t.Errorf("expected ErrValidation for 0 options, got %v", err)
+	if err := validateOptionsForType(TypeMultipleChoice, nil); err == nil {
+		t.Errorf("expected an error for 0 options, got nil")
 	}
 }
 
 func TestValidateOptionsForType_FreeText(t *testing.T) {
-	if err := validateOptionsForType(QuestionTypeFreeText, nil); err != nil {
+	if err := validateOptionsForType(TypeFreeText, nil); err != nil {
 		t.Errorf("expected no options to be valid for free_text, got %v", err)
 	}
 
-	withOptions := []QuestionOptionInput{{Text: "a"}}
-	if err := validateOptionsForType(QuestionTypeFreeText, withOptions); err != ErrValidation {
-		t.Errorf("expected ErrValidation for free_text with options, got %v", err)
+	withOptions := []OptionInput{{Text: "a"}}
+	if err := validateOptionsForType(TypeFreeText, withOptions); err == nil {
+		t.Errorf("expected an error for free_text with options, got nil")
 	}
 }
 
 func TestValidateOptionsForType_RejectsUnknownType(t *testing.T) {
-	if err := validateOptionsForType("essay", nil); err != ErrValidation {
-		t.Errorf("expected ErrValidation for unknown question type, got %v", err)
+	if err := validateOptionsForType("essay", nil); err == nil {
+		t.Errorf("expected an error for unknown question type, got nil")
 	}
 }

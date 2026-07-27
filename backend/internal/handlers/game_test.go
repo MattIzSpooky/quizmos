@@ -7,19 +7,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
 func TestMediaFields_NoMedia(t *testing.T) {
-	url, mediaType := mediaFields(service.QuestionWithOptions{})
+	url, mediaType := mediaFields(question.WithOptions{})
 	if url != nil || mediaType != nil {
 		t.Errorf("mediaFields() = (%v, %v), want (nil, nil)", url, mediaType)
 	}
 }
 
 func TestMediaFields_WithMedia(t *testing.T) {
-	q := service.QuestionWithOptions{
+	q := question.WithOptions{
 		Question: db.Question{MediaType: pgtype.Text{String: "audio", Valid: true}},
 		MediaURL: "https://minio.example/questions/clip.mp3",
 	}
@@ -35,7 +36,7 @@ func TestMediaFields_WithMedia(t *testing.T) {
 }
 
 func TestQuestionStartedPayload(t *testing.T) {
-	q := service.QuestionWithOptions{
+	q := question.WithOptions{
 		Question: db.Question{
 			ID:               uuid.New(),
 			Type:             "multiple_choice",
@@ -73,7 +74,7 @@ func TestQuestionStartedPayload(t *testing.T) {
 func TestQuestionEndedPayload(t *testing.T) {
 	correctID := uuid.New()
 	wrongID := uuid.New()
-	q := service.QuestionWithOptions{
+	q := question.WithOptions{
 		Question: db.Question{ID: uuid.New()},
 		Options: []db.QuestionOption{
 			{ID: correctID, IsCorrect: true},
@@ -100,7 +101,7 @@ func TestQuestionEndedPayload(t *testing.T) {
 }
 
 func TestQuestionReviewedPayload_FreeTextHasNoCorrectOption(t *testing.T) {
-	q := service.QuestionWithOptions{
+	q := question.WithOptions{
 		Question: db.Question{ID: uuid.New(), Prompt: "Explain yourself"},
 		Options:  nil,
 	}
@@ -117,7 +118,7 @@ func TestQuestionReviewedPayload_FreeTextHasNoCorrectOption(t *testing.T) {
 
 func TestLeaderboardEntriesPayload_PreservesOrderAndFields(t *testing.T) {
 	aliceID := uuid.New()
-	entries := []service.LeaderboardEntry{
+	entries := []game.LeaderboardEntry{
 		{ClientID: aliceID, Nickname: "Alice", Score: 500, Rank: 1, Color: "nova"},
 	}
 

@@ -7,11 +7,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
 )
 
 func TestMediaFields_NoMedia(t *testing.T) {
-	q := service.QuestionWithOptions{Question: db.Question{}}
+	q := question.WithOptions{Question: db.Question{}}
 
 	url, mediaType := mediaFields(q)
 
@@ -24,7 +25,7 @@ func TestMediaFields_NoMedia(t *testing.T) {
 }
 
 func TestMediaFields_WithMedia(t *testing.T) {
-	q := service.QuestionWithOptions{
+	q := question.WithOptions{
 		Question: db.Question{MediaType: pgtype.Text{String: "image", Valid: true}},
 		MediaURL: "https://minio.example/questions/abc.png",
 	}
@@ -42,7 +43,7 @@ func TestMediaFields_WithMedia(t *testing.T) {
 func TestQuestionReviewedPayload(t *testing.T) {
 	correctID := uuid.New()
 	wrongID := uuid.New()
-	q := service.QuestionWithOptions{
+	q := question.WithOptions{
 		Question: db.Question{
 			ID:       uuid.New(),
 			Prompt:   "2+2?",
@@ -86,7 +87,7 @@ func TestQuestionReviewedPayload(t *testing.T) {
 
 func TestApplyYourAnswer_NotAnswered(t *testing.T) {
 	payload := &QuestionStarted{}
-	applyYourAnswer(payload, service.PlayerAnswerStatus{Answered: false})
+	applyYourAnswer(payload, game.PlayerAnswerStatus{Answered: false})
 
 	if payload.YourAnswer != nil {
 		t.Errorf("YourAnswer = %v, want nil for an unanswered question", payload.YourAnswer)
@@ -96,7 +97,7 @@ func TestApplyYourAnswer_NotAnswered(t *testing.T) {
 func TestApplyYourAnswer_PendingFreeText(t *testing.T) {
 	text := "my answer"
 	payload := &QuestionStarted{}
-	applyYourAnswer(payload, service.PlayerAnswerStatus{
+	applyYourAnswer(payload, game.PlayerAnswerStatus{
 		Answered: true,
 		Pending:  true,
 		Text:     &text,
@@ -122,7 +123,7 @@ func TestApplyYourAnswer_PendingFreeText(t *testing.T) {
 func TestApplyYourAnswer_GradedMultipleChoice(t *testing.T) {
 	optionID := uuid.New()
 	payload := &QuestionStarted{}
-	applyYourAnswer(payload, service.PlayerAnswerStatus{
+	applyYourAnswer(payload, game.PlayerAnswerStatus{
 		Answered:         true,
 		Pending:          false,
 		SelectedOptionID: &optionID,

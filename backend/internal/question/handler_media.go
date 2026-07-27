@@ -1,4 +1,4 @@
-package handlers
+package question
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"github.com/mattizspooky/quizmos/backend/internal/api"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/core"
 )
 
 // isForbidden reports whether err (from Keycloak.RequireAdminToken) is a
@@ -38,7 +38,7 @@ func authHeaderValue(p *string) string {
 // parameter's description in api/openapi.yaml for why: the validator
 // would otherwise consume the multipart body before the handler gets a
 // chance to stream it to storage.
-func (h *Handlers) UploadQuestionMedia(ctx context.Context, req api.UploadQuestionMediaRequestObject) (api.UploadQuestionMediaResponseObject, error) {
+func (h *Handler) UploadQuestionMedia(ctx context.Context, req api.UploadQuestionMediaRequestObject) (api.UploadQuestionMediaResponseObject, error) {
 	if _, err := h.keycloak.RequireAdminToken(authHeaderValue(req.Params.Authorization)); err != nil {
 		if isForbidden(err) {
 			return api.UploadQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
@@ -48,14 +48,14 @@ func (h *Handlers) UploadQuestionMedia(ctx context.Context, req api.UploadQuesti
 
 	part, err := nextFilePart(req.Body)
 	if err != nil {
-		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion(`expected a multipart file field named "file"`)}, nil
+		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequest(`expected a multipart file field named "file"`)}, nil
 	}
 	defer part.Close()
 
 	contentType := part.Header.Get("Content-Type")
-	_, limit, ok := service.MediaLimitBytes(contentType)
+	_, limit, ok := MediaLimitBytes(contentType)
 	if !ok {
-		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion("unsupported media type: " + contentType)}, nil
+		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequest("unsupported media type: " + contentType)}, nil
 	}
 	// Multipart parts don't carry a size header, so the only way to
 	// enforce the cap is to read up to one byte past it: if that many
@@ -65,23 +65,23 @@ func (h *Handlers) UploadQuestionMedia(ctx context.Context, req api.UploadQuesti
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion("file too large")}, nil
+		return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequest("file too large")}, nil
 	}
 
-	question, err := h.svc.UploadQuestionMedia(ctx, req.QuizId, req.QuestionId, contentType, bytes.NewReader(data), int64(len(data)))
+	q, err := h.svc.UploadMedia(ctx, req.QuizId, req.QuestionId, contentType, bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrNotFound):
-			return api.UploadQuestionMedia404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
-		case errors.Is(err, service.ErrValidation):
-			return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequestQuestion("unsupported media type: " + contentType)}, nil
+		case errors.Is(err, core.ErrNotFound):
+			return api.UploadQuestionMedia404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+		case errors.Is(err, core.ErrValidation):
+			return api.UploadQuestionMedia400JSONResponse{BadRequestJSONResponse: badRequest("unsupported media type: " + contentType)}, nil
 		}
 		return nil, err
 	}
-	return api.UploadQuestionMedia200JSONResponse(questionToAPI(question)), nil
+	return api.UploadQuestionMedia200JSONResponse(ToAPI(q)), nil
 }
 
-func (h *Handlers) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuestionMediaRequestObject) (api.DeleteQuestionMediaResponseObject, error) {
+func (h *Handler) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuestionMediaRequestObject) (api.DeleteQuestionMediaResponseObject, error) {
 	if _, err := h.keycloak.RequireAdminToken(authHeaderValue(req.Params.Authorization)); err != nil {
 		if isForbidden(err) {
 			return api.DeleteQuestionMedia403JSONResponse{ForbiddenJSONResponse: api.ForbiddenJSONResponse(apiError("forbidden", err.Error()))}, nil
@@ -89,14 +89,14 @@ func (h *Handlers) DeleteQuestionMedia(ctx context.Context, req api.DeleteQuesti
 		return api.DeleteQuestionMedia401JSONResponse{UnauthorizedJSONResponse: api.UnauthorizedJSONResponse(apiError("unauthorized", err.Error()))}, nil
 	}
 
-	question, err := h.svc.DeleteQuestionMedia(ctx, req.QuizId, req.QuestionId)
+	q, err := h.svc.DeleteMedia(ctx, req.QuizId, req.QuestionId)
 	if err != nil {
-		if errors.Is(err, service.ErrNotFound) {
-			return api.DeleteQuestionMedia404JSONResponse{NotFoundJSONResponse: notFoundQuestion()}, nil
+		if errors.Is(err, core.ErrNotFound) {
+			return api.DeleteQuestionMedia404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 		}
 		return nil, err
 	}
-	return api.DeleteQuestionMedia200JSONResponse(questionToAPI(question)), nil
+	return api.DeleteQuestionMedia200JSONResponse(ToAPI(q)), nil
 }
 
 // nextFilePart returns the first part named "file" in mr, skipping any

@@ -25,9 +25,11 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/mattizspooky/quizmos/backend/internal/auth"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
 	"github.com/mattizspooky/quizmos/backend/internal/handlers"
 	"github.com/mattizspooky/quizmos/backend/internal/httpserver"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
+	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 	"github.com/mattizspooky/quizmos/backend/internal/storage"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
@@ -166,9 +168,12 @@ func startEnvironment(ctx context.Context) (*environment, error) {
 		return nil, fmt.Errorf("ensure media bucket: %w", err)
 	}
 
-	svc := service.New(pool, store)
-	hub := ws.NewHub(svc, []string{"*"})
-	h := handlers.New(svc, hub, kcAuth)
+	questionSvc := question.New(pool, store)
+	quizSvc := quiz.New(pool, store, questionSvc)
+	gameSvc := game.New(pool, questionSvc)
+	questionHandler := question.NewHandler(questionSvc, kcAuth)
+	hub := ws.NewHub(gameSvc, quizSvc, []string{"*"})
+	h := handlers.New(gameSvc, quizSvc, questionHandler, hub)
 	router, err := httpserver.New(httpserver.Options{
 		StrictHandler:  h,
 		Keycloak:       kcAuth,

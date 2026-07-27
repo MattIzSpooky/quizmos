@@ -1,109 +1,105 @@
-package service
+package quiz
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mattizspooky/quizmos/backend/internal/core"
 	db "github.com/mattizspooky/quizmos/backend/internal/db/sqlc"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
 )
 
-type QuizWithCount struct {
-	db.Quiz
-	QuestionCount int
-}
-
-func (s *Service) CreateQuiz(ctx context.Context, createdBy, title, description string, timed bool) (QuizWithCount, error) {
-	ctx, span := tracer.Start(ctx, "service.CreateQuiz")
+func (s *Service) Create(ctx context.Context, createdBy, title, description string, timed bool) (WithCount, error) {
+	ctx, span := tracer.Start(ctx, "quiz.Create")
 	defer span.End()
 
 	q, err := s.q.CreateQuiz(ctx, db.CreateQuizParams{Title: title, Description: description, CreatedBy: createdBy, Timed: timed})
 	if err != nil {
-		return QuizWithCount{}, err
+		return WithCount{}, err
 	}
-	return QuizWithCount{Quiz: q}, nil
+	return WithCount{Quiz: q}, nil
 }
 
-func (s *Service) ListQuizzes(ctx context.Context) ([]QuizWithCount, error) {
-	ctx, span := tracer.Start(ctx, "service.ListQuizzes")
+func (s *Service) List(ctx context.Context) ([]WithCount, error) {
+	ctx, span := tracer.Start(ctx, "quiz.List")
 	defer span.End()
 
 	quizzes, err := s.q.ListQuizzes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]QuizWithCount, 0, len(quizzes))
+	out := make([]WithCount, 0, len(quizzes))
 	for _, q := range quizzes {
 		count, err := s.q.CountQuizQuestions(ctx, q.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, QuizWithCount{Quiz: q, QuestionCount: int(count)})
+		out = append(out, WithCount{Quiz: q, QuestionCount: int(count)})
 	}
 	return out, nil
 }
 
-func (s *Service) GetQuiz(ctx context.Context, id uuid.UUID) (QuizWithCount, error) {
-	ctx, span := tracer.Start(ctx, "service.GetQuiz")
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (WithCount, error) {
+	ctx, span := tracer.Start(ctx, "quiz.Get")
 	defer span.End()
 
 	q, err := s.q.GetQuiz(ctx, id)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return QuizWithCount{}, ErrNotFound
+			return WithCount{}, core.ErrNotFound
 		}
-		return QuizWithCount{}, err
+		return WithCount{}, err
 	}
 	count, err := s.q.CountQuizQuestions(ctx, q.ID)
 	if err != nil {
-		return QuizWithCount{}, err
+		return WithCount{}, err
 	}
-	return QuizWithCount{Quiz: q, QuestionCount: int(count)}, nil
+	return WithCount{Quiz: q, QuestionCount: int(count)}, nil
 }
 
-func (s *Service) GetQuizDetail(ctx context.Context, id uuid.UUID) (QuizWithCount, []QuestionWithOptions, error) {
-	ctx, span := tracer.Start(ctx, "service.GetQuizDetail")
+func (s *Service) GetDetail(ctx context.Context, id uuid.UUID) (WithCount, []question.WithOptions, error) {
+	ctx, span := tracer.Start(ctx, "quiz.GetDetail")
 	defer span.End()
 
-	quiz, err := s.GetQuiz(ctx, id)
+	quiz, err := s.Get(ctx, id)
 	if err != nil {
-		return QuizWithCount{}, nil, err
+		return WithCount{}, nil, err
 	}
-	questions, err := s.ListQuestions(ctx, id)
+	questions, err := s.questions.List(ctx, id)
 	if err != nil {
-		return QuizWithCount{}, nil, err
+		return WithCount{}, nil, err
 	}
 	return quiz, questions, nil
 }
 
-func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, description *string, timed *bool) (QuizWithCount, error) {
-	ctx, span := tracer.Start(ctx, "service.UpdateQuiz")
+func (s *Service) Update(ctx context.Context, id uuid.UUID, title, description *string, timed *bool) (WithCount, error) {
+	ctx, span := tracer.Start(ctx, "quiz.Update")
 	defer span.End()
 
 	params := db.UpdateQuizParams{
 		ID:          id,
-		Title:       textParam(title),
-		Description: textParam(description),
-		Timed:       boolParam(timed),
+		Title:       core.TextParam(title),
+		Description: core.TextParam(description),
+		Timed:       core.BoolParam(timed),
 	}
 	q, err := s.q.UpdateQuiz(ctx, params)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return QuizWithCount{}, ErrNotFound
+			return WithCount{}, core.ErrNotFound
 		}
-		return QuizWithCount{}, err
+		return WithCount{}, err
 	}
 	count, err := s.q.CountQuizQuestions(ctx, q.ID)
 	if err != nil {
-		return QuizWithCount{}, err
+		return WithCount{}, err
 	}
-	return QuizWithCount{Quiz: q, QuestionCount: int(count)}, nil
+	return WithCount{Quiz: q, QuestionCount: int(count)}, nil
 }
 
-// DeleteQuiz removes a quiz along with everything created from it: its
+// Delete removes a quiz along with everything created from it: its
 // questions (and their options), and — now that games.quiz_id cascades
 // rather than restricting — every game ever played from it, including
 // their players and answers. The one thing a SQL cascade can't reach is
@@ -115,8 +111,8 @@ func (s *Service) UpdateQuiz(ctx context.Context, id uuid.UUID, title, descripti
 // The returned game IDs are for the caller (the REST handler, which
 // alone holds the websocket hub) to close out any live connections still
 // pointing at a game that no longer exists.
-func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
-	ctx, span := tracer.Start(ctx, "service.DeleteQuiz")
+func (s *Service) Delete(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	ctx, span := tracer.Start(ctx, "quiz.Delete")
 	defer span.End()
 
 	questions, err := s.q.ListQuestionsByQuiz(ctx, id)
@@ -133,7 +129,7 @@ func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, er
 		return nil, err
 	}
 	if n == 0 {
-		return nil, ErrNotFound
+		return nil, core.ErrNotFound
 	}
 
 	for _, q := range questions {
@@ -141,7 +137,7 @@ func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, er
 			continue
 		}
 		if err := s.store.Delete(ctx, q.MediaKey.String); err != nil {
-			slog.ErrorContext(ctx, "service.delete_media_failed", "media_key", q.MediaKey.String, "quiz.id", id, "error", err)
+			slog.ErrorContext(ctx, "quiz.delete_media_failed", "media_key", q.MediaKey.String, "quiz.id", id, "error", err)
 		}
 	}
 
@@ -150,14 +146,4 @@ func (s *Service) DeleteQuiz(ctx context.Context, id uuid.UUID) ([]uuid.UUID, er
 		gameIDs[i] = g.ID
 	}
 	return gameIDs, nil
-}
-
-func (s *Service) requireQuiz(ctx context.Context, id uuid.UUID) error {
-	if _, err := s.q.GetQuiz(ctx, id); err != nil {
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("quiz %s: %w", id, ErrNotFound)
-		}
-		return err
-	}
-	return nil
 }

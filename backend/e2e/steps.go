@@ -16,7 +16,7 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/google/uuid"
 
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
 	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
@@ -772,7 +772,7 @@ func uploadingOverLimitImageMediaShouldFail(ctx context.Context, prompt string, 
 	if err != nil {
 		return err
 	}
-	oversized := bytes.Repeat([]byte{0}, int(service.MaxImageMediaBytes)+1)
+	oversized := bytes.Repeat([]byte{0}, int(question.MaxImageMediaBytes)+1)
 	resp, err := w.uploadMedia(ctx, path, "big.png", "image/png", oversized)
 	if err != nil {
 		return err
@@ -1517,7 +1517,7 @@ func submitsFreeTextAnswer(ctx context.Context, nickname, text string) error {
 }
 
 // submitsOverLengthFreeTextAnswer exercises the 500-character limit
-// (see service.MaxFreeTextAnswerLength) with a 501-character answer.
+// (see game.MaxFreeTextAnswerLength) with a 501-character answer.
 func submitsOverLengthFreeTextAnswer(ctx context.Context, nickname string) error {
 	w := worldFromContext(ctx)
 	p, ok := w.players[nickname]

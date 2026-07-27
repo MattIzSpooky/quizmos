@@ -1,14 +1,14 @@
-// Package handlers implements api.StrictServerInterface: it maps between
-// service-layer results and generated OpenAPI response types, and
-// triggers websocket broadcasts after game-lifecycle mutations.
 package handlers
 
 import (
 	"github.com/mattizspooky/quizmos/backend/internal/api"
-	"github.com/mattizspooky/quizmos/backend/internal/service"
+	"github.com/mattizspooky/quizmos/backend/internal/core"
+	"github.com/mattizspooky/quizmos/backend/internal/game"
+	"github.com/mattizspooky/quizmos/backend/internal/question"
+	"github.com/mattizspooky/quizmos/backend/internal/quiz"
 )
 
-func quizToAPI(q service.QuizWithCount) api.Quiz {
+func quizToAPI(q quiz.WithCount) api.Quiz {
 	desc := q.Description
 	return api.Quiz{
 		Id:            q.ID,
@@ -16,16 +16,16 @@ func quizToAPI(q service.QuizWithCount) api.Quiz {
 		Description:   &desc,
 		QuestionCount: q.QuestionCount,
 		Timed:         q.Timed,
-		CreatedAt:     service.TimeOrZero(q.CreatedAt),
-		UpdatedAt:     service.TimeOrZero(q.UpdatedAt),
+		CreatedAt:     core.TimeOrZero(q.CreatedAt),
+		UpdatedAt:     core.TimeOrZero(q.UpdatedAt),
 	}
 }
 
-func quizDetailToAPI(q service.QuizWithCount, questions []service.QuestionWithOptions) api.QuizDetail {
+func quizDetailToAPI(q quiz.WithCount, questions []question.WithOptions) api.QuizDetail {
 	base := quizToAPI(q)
 	apiQuestions := make([]api.Question, len(questions))
-	for i, question := range questions {
-		apiQuestions[i] = questionToAPI(question)
+	for i, qn := range questions {
+		apiQuestions[i] = question.ToAPI(qn)
 	}
 	return api.QuizDetail{
 		Id:            base.Id,
@@ -39,54 +39,22 @@ func quizDetailToAPI(q service.QuizWithCount, questions []service.QuestionWithOp
 	}
 }
 
-func questionToAPI(q service.QuestionWithOptions) api.Question {
-	options := make([]api.QuestionOptionWithAnswer, len(q.Options))
-	for i, o := range q.Options {
-		options[i] = api.QuestionOptionWithAnswer{Id: o.ID, Text: o.Text, IsCorrect: o.IsCorrect}
-	}
-	out := api.Question{
-		Id:               q.ID,
-		QuizId:           q.QuizID,
-		Type:             api.QuestionType(q.Type),
-		Prompt:           q.Prompt,
-		Position:         int(q.Position),
-		TimeLimitSeconds: int(q.TimeLimitSeconds),
-		Points:           int(q.Points),
-		Options:          options,
-	}
-	if q.MediaKey.Valid {
-		url := q.MediaURL
-		mediaType := api.MediaType(q.MediaType.String)
-		out.MediaUrl = &url
-		out.MediaType = &mediaType
-	}
-	return out
-}
-
-func createQuestionOptionsToService(opts []api.CreateQuestionOption) []service.QuestionOptionInput {
-	out := make([]service.QuestionOptionInput, len(opts))
-	for i, o := range opts {
-		out[i] = service.QuestionOptionInput{Text: o.Text, IsCorrect: o.IsCorrect}
-	}
-	return out
-}
-
-func gameToAPI(g service.GameSummary) api.AdminGame {
+func gameToAPI(g game.Summary) api.AdminGame {
 	return api.AdminGame{
 		Id:                   g.ID,
 		QuizId:               g.QuizID,
 		QuizTitle:            g.QuizTitle,
 		Code:                 g.Code,
 		Status:               api.GameStatus(g.Status),
-		CurrentQuestionIndex: service.IntFromInt4(g.CurrentQuestionIndex),
+		CurrentQuestionIndex: core.IntFromInt4(g.CurrentQuestionIndex),
 		TotalQuestions:       g.TotalQuestions,
 		PlayerCount:          g.PlayerCount,
-		CreatedAt:            service.TimeOrZero(g.CreatedAt),
+		CreatedAt:            core.TimeOrZero(g.CreatedAt),
 	}
 }
 
-func gameDetailToAPI(g service.GameDetail, connected map[string]bool) api.AdminGameDetail {
-	base := gameToAPI(g.GameSummary)
+func gameDetailToAPI(g game.Detail, connected map[string]bool) api.AdminGameDetail {
+	base := gameToAPI(g.Summary)
 	players := make([]api.AdminPlayer, len(g.Players))
 	for i, p := range g.Players {
 		players[i] = api.AdminPlayer{
@@ -111,7 +79,7 @@ func gameDetailToAPI(g service.GameDetail, connected map[string]bool) api.AdminG
 	}
 }
 
-func freeTextAnswerToAPI(a service.FreeTextAnswer) api.FreeTextAnswer {
+func freeTextAnswerToAPI(a game.FreeTextAnswer) api.FreeTextAnswer {
 	out := api.FreeTextAnswer{
 		Id:       a.ID,
 		ClientId: a.ClientID,
@@ -128,7 +96,7 @@ func freeTextAnswerToAPI(a service.FreeTextAnswer) api.FreeTextAnswer {
 	return out
 }
 
-func leaderboardToAPI(entries []service.LeaderboardEntry) api.Leaderboard {
+func leaderboardToAPI(entries []game.LeaderboardEntry) api.Leaderboard {
 	out := make([]api.LeaderboardEntry, len(entries))
 	for i, e := range entries {
 		out[i] = api.LeaderboardEntry{ClientId: e.ClientID, Nickname: e.Nickname, Score: e.Score, Rank: e.Rank, Color: api.PlayerColor(e.Color)}
