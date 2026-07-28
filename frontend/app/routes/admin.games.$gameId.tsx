@@ -3,6 +3,8 @@ import type { Route } from "./+types/admin.games.$gameId";
 import { adminApi } from "../lib/api/client";
 import { useRequireAdmin } from "../lib/auth/useRequireAdmin";
 import type { components } from "../lib/api/schema.gen";
+import { useAdminGameSocket } from "../lib/ws/useAdminGameSocket";
+import type { ServerMessage } from "../lib/ws/envelope";
 import { AdminHeader } from "../components/AdminHeader";
 import { AudioPlayer } from "../components/AudioPlayer";
 import { Constellation } from "../components/Constellation";
@@ -63,8 +65,6 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
   useEffect(() => {
     if (!ready) return;
     load();
-    const interval = setInterval(load, 2000);
-    return () => clearInterval(interval);
   }, [ready]);
 
   // The quiz's questions don't change once a game is running, so fetch
@@ -88,19 +88,44 @@ export default function AdminGameControl({ params }: Route.ComponentProps) {
     if (data) setFreeTextAnswers(data);
   }
 
-  // Polls the current free_text question's submissions so new answers show
-  // up for grading without the admin needing to refresh anything.
+  // Fetches the current free_text question's submissions once; new answers
+  // and grading updates arrive afterward over the websocket (see
+  // handleSocketMessage's "freeTextAnswer.updated" case) instead of a poll.
   useEffect(() => {
     if (game?.status !== "in_progress" || displayedQuestion?.type !== "free_text") {
       setFreeTextAnswers(null);
       return;
     }
-    const questionId = displayedQuestion.id;
-    loadFreeTextAnswers(questionId);
-    const interval = setInterval(() => loadFreeTextAnswers(questionId), 2000);
-    return () => clearInterval(interval);
+    loadFreeTextAnswers(displayedQuestion.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game?.status, displayedQuestion?.id, displayedQuestion?.type]);
+
+  function handleSocketMessage(msg: ServerMessage) {
+    if (msg.type === "freeTextAnswer.updated") {
+      if (msg.payload.questionId !== displayedQuestion?.id) return;
+      setFreeTextAnswers((prev) => {
+        const answer = msg.payload;
+        const next = { ...answer };
+        if (!prev) return [next];
+        const index = prev.findIndex((a) => a.id === next.id);
+        if (index === -1) return [...prev, next];
+        return prev.map((a, i) => (i === index ? next : a));
+      });
+      return;
+    }
+    // Every other event (presence, question/leaderboard/game lifecycle,
+    // player kicks) means the game-state snapshot is stale — refetch it
+    // rather than re-deriving the same assembly logic client-side.
+    load();
+    if (msg.type === "game.ended") {
+      // The server closes this connection shortly after game.ended anyway
+      // (see ws.Hub.CloseRoom); stop it from auto-reconnecting into a room
+      // that's now permanently idle.
+      disconnectSocket();
+    }
+  }
+
+  const { disconnect: disconnectSocket } = useAdminGameSocket(ready ? gameId : null, handleSocketMessage);
 
   async function gradeAnswer(answerId: string, correct: boolean) {
     await adminApi.POST("/admin/games/{gameId}/answers/{answerId}/grade", {

@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"github.com/google/uuid"
+
 	"github.com/mattizspooky/quizmos/backend/internal/api"
 	"github.com/mattizspooky/quizmos/backend/internal/core"
 	"github.com/mattizspooky/quizmos/backend/internal/game"
 	"github.com/mattizspooky/quizmos/backend/internal/question"
 	"github.com/mattizspooky/quizmos/backend/internal/quiz"
+	"github.com/mattizspooky/quizmos/backend/internal/ws"
 )
 
 func quizToAPI(q quiz.WithCount) api.Quiz {
@@ -90,6 +93,30 @@ func freeTextAnswerToAPI(a game.FreeTextAnswer) api.FreeTextAnswer {
 	if a.Graded {
 		correct := a.Correct
 		points := a.PointsAwarded
+		out.Correct = &correct
+		out.PointsAwarded = &points
+	}
+	return out
+}
+
+// freeTextAnswerToWsEvent mirrors freeTextAnswerToAPI, targeting the
+// asyncapi-generated ws.FreeTextAnswerUpdated type instead of the
+// openapi-generated api.FreeTextAnswer one — kept as its own small copy
+// (rather than shared) since ws already imports handlers-adjacent types
+// indirectly via this package, and the two schemas are only coincidentally
+// identical today, not guaranteed to stay that way.
+func freeTextAnswerToWsEvent(a game.FreeTextAnswer, questionID uuid.UUID) ws.FreeTextAnswerUpdated {
+	out := ws.FreeTextAnswerUpdated{
+		QuestionID: questionID.String(),
+		ID:         a.ID.String(),
+		ClientID:   a.ClientID.String(),
+		Nickname:   a.Nickname,
+		Text:       a.Text,
+		Graded:     a.Graded,
+	}
+	if a.Graded {
+		correct := a.Correct
+		points := int64(a.PointsAwarded)
 		out.Correct = &correct
 		out.PointsAwarded = &points
 	}

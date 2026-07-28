@@ -25,6 +25,10 @@ const (
 	TypeGameEnded            = "game.ended"
 	TypeError                = "error"
 	TypeAnswerSubmit         = "answer.submit"
+
+	// TypeFreeTextAnswerUpdated is admin-only — see adminSession in
+	// api/asyncapi.yaml. Never broadcast to players.
+	TypeFreeTextAnswerUpdated = "freeTextAnswer.updated"
 )
 
 func encode(msgType string, payload any) (Envelope, error) {

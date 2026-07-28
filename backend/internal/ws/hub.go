@@ -71,6 +71,13 @@ type client struct {
 type room struct {
 	mu      sync.RWMutex
 	clients map[uuid.UUID]*client
+	// admins holds the admin live-control page's own websocket
+	// connections for this game, keyed by connID (admins have no
+	// client_id — a browser tab is just whichever connection it is).
+	// They receive every message clients do (see broadcastToRoom) plus
+	// admin-only ones (see broadcastToAdmins), but never count toward
+	// playerCount/ConnectedClientIDs and can't submit answers.
+	admins map[string]*client
 	// reviewing tracks "we're currently showing a read-only recap of
 	// this question index" — set on question.reviewed, cleared on the
 	// next real question.started. ReviewQuestion itself never touches
@@ -88,11 +95,23 @@ type Hub struct {
 	mu    sync.RWMutex
 	rooms map[uuid.UUID]*room
 
+	// ticketsMu guards tickets, the single-use admin-websocket tickets
+	// minted by MintAdminTicket and consumed by redeemAdminTicket — see
+	// ticket.go.
+	ticketsMu sync.Mutex
+	tickets   map[string]ticketEntry
+
 	AllowedOrigins []string
 }
 
 func NewHub(games *game.Service, quizzes *quiz.Service, allowedOrigins []string) *Hub {
-	return &Hub{games: games, quizzes: quizzes, rooms: make(map[uuid.UUID]*room), AllowedOrigins: allowedOrigins}
+	return &Hub{
+		games:          games,
+		quizzes:        quizzes,
+		rooms:          make(map[uuid.UUID]*room),
+		tickets:        make(map[string]ticketEntry),
+		AllowedOrigins: allowedOrigins,
+	}
 }
 
 func (h *Hub) roomFor(gameID uuid.UUID) *room {
@@ -100,7 +119,7 @@ func (h *Hub) roomFor(gameID uuid.UUID) *room {
 	defer h.mu.Unlock()
 	r, ok := h.rooms[gameID]
 	if !ok {
-		r = &room{clients: make(map[uuid.UUID]*client)}
+		r = &room{clients: make(map[uuid.UUID]*client), admins: make(map[string]*client)}
 		h.rooms[gameID] = r
 	}
 	return r
@@ -170,6 +189,72 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) {
 		ClientID:    clientID.String(),
 		PlayerCount: int64(remaining),
 	})
+}
+
+// UpgradeAdmin handles GET /ws/admin/games/{gameId}?ticket={ticket}. The
+// ticket must have been minted moments earlier by POST
+// /admin/games/{gameId}/ws-ticket (see handlers.CreateGameWsTicket, which
+// only succeeds for an authenticated admin) — browsers can't attach the
+// Authorization header to a websocket handshake, so this ticket is how the
+// connection proves it belongs to that admin without the real bearer token
+// ever appearing in a URL. Unlike the player Upgrade above, there's no
+// catch-up snapshot: the admin page does one REST fetch itself around
+// connecting, and this socket only ever carries deltas from that point on.
+func (h *Hub) UpgradeAdmin(w http.ResponseWriter, r *http.Request) {
+	gameID, err := uuid.Parse(chi.URLParam(r, "gameId"))
+	if err != nil {
+		http.Error(w, "invalid game id", http.StatusBadRequest)
+		return
+	}
+
+	ticket := r.URL.Query().Get("ticket")
+	if ticket == "" || !h.redeemAdminTicket(ticket, gameID) {
+		http.Error(w, "missing or invalid ticket", http.StatusUnauthorized)
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: h.AllowedOrigins})
+	if err != nil {
+		return
+	}
+
+	connID := trace.SpanContextFromContext(r.Context()).TraceID().String()
+	c := &client{conn: conn, send: make(chan Envelope, 16), connID: connID}
+	rm := h.roomFor(gameID)
+
+	rm.mu.Lock()
+	rm.admins[connID] = c
+	rm.mu.Unlock()
+
+	slog.InfoContext(r.Context(), "ws.admin_connect", "ws.connection_id", connID, "game.id", gameID)
+	wsConnectionsActive.Add(r.Context(), 1)
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	go c.writeLoop(ctx)
+	h.adminReadLoop(ctx, c)
+
+	rm.mu.Lock()
+	delete(rm.admins, connID)
+	rm.mu.Unlock()
+	close(c.send)
+
+	slog.InfoContext(ctx, "ws.admin_disconnect", "ws.connection_id", connID, "game.id", gameID)
+	wsConnectionsActive.Add(ctx, -1)
+}
+
+// adminReadLoop just drains inbound frames until the connection closes —
+// admin connections are receive-only, there's nothing for them to submit,
+// unlike readLoop's players which can send answer.submit.
+func (h *Hub) adminReadLoop(ctx context.Context, c *client) {
+	defer c.conn.CloseNow()
+	for {
+		var env Envelope
+		if err := wsjson.Read(ctx, c.conn, &env); err != nil {
+			return
+		}
+	}
 }
 
 // sendCatchUp gets a freshly-connected client to the same state as
@@ -406,6 +491,45 @@ func (h *Hub) handleAnswerSubmit(ctx context.Context, gameID uuid.UUID, c *clien
 		TotalScore:    int64(result.TotalScore),
 		Pending:       result.Pending,
 	})
+
+	if submit.Text != nil {
+		h.broadcastFreeTextAnswerUpdate(ctx, gameID, questionID, c.clientID)
+	}
+}
+
+// broadcastFreeTextAnswerUpdate tells connected admins about a free-text
+// submission the moment it happens, replacing the admin page's old poll of
+// ListFreeTextAnswers. It re-reads the row it just wrote (same pattern
+// handlers.GradeAnswer uses to report a grading outcome) rather than
+// threading an answer ID back out of game.Service.SubmitAnswer, which
+// today only reports the score, not the row.
+func (h *Hub) broadcastFreeTextAnswerUpdate(ctx context.Context, gameID, questionID, clientID uuid.UUID) {
+	answers, err := h.games.ListFreeTextAnswers(ctx, gameID, questionID)
+	if err != nil {
+		slog.WarnContext(ctx, "ws.free_text_answer_lookup_failed", "error", err)
+		return
+	}
+	for _, a := range answers {
+		if a.ClientID != clientID {
+			continue
+		}
+		payload := FreeTextAnswerUpdated{
+			QuestionID: questionID.String(),
+			ID:         a.ID.String(),
+			ClientID:   a.ClientID.String(),
+			Nickname:   a.Nickname,
+			Text:       a.Text,
+			Graded:     a.Graded,
+		}
+		if a.Graded {
+			correct := a.Correct
+			points := int64(a.PointsAwarded)
+			payload.Correct = &correct
+			payload.PointsAwarded = &points
+		}
+		h.BroadcastToAdmins(gameID, TypeFreeTextAnswerUpdated, payload)
+		return
+	}
 }
 
 func (h *Hub) sendError(c *client, code, message string) {
@@ -438,6 +562,39 @@ func (h *Hub) broadcastToRoom(rm *room, msgType string, payload any) {
 		case c.send <- env:
 		default:
 			slog.Warn("ws.send_dropped", "ws.message_type", msgType, "ws.connection_id", c.connID, "client.id", c.clientID)
+		}
+	}
+	// Every player-facing broadcast reaches connected admins too, so the
+	// admin live-control page can replace its game-state polling with
+	// this same feed — see broadcastToAdmins for the reverse (admin-only
+	// messages that must never reach players).
+	sendEnvelopeTo(rm.admins, msgType, env)
+}
+
+// broadcastToAdmins sends payload only to gameID's connected admin
+// connections (see room.admins) — for events, like a free-text answer
+// submission, that must not reach players.
+func (h *Hub) broadcastToAdmins(rm *room, msgType string, payload any) {
+	env, err := encode(msgType, payload)
+	if err != nil {
+		slog.Error("ws.encode_failed", "ws.message_type", msgType, "error", err)
+		return
+	}
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	sendEnvelopeTo(rm.admins, msgType, env)
+}
+
+// sendEnvelopeTo delivers env to every client in recipients — recipients
+// is always rm.admins today, but takes a plain map (not *room) so it can
+// be called while rm.mu is already held for reading, by either
+// broadcastToRoom or broadcastToAdmins.
+func sendEnvelopeTo(recipients map[string]*client, msgType string, env Envelope) {
+	for _, c := range recipients {
+		select {
+		case c.send <- env:
+		default:
+			slog.Warn("ws.send_dropped", "ws.message_type", msgType, "ws.connection_id", c.connID)
 		}
 	}
 }
@@ -520,8 +677,11 @@ func (h *Hub) CloseRoom(gameID uuid.UUID) {
 		return
 	}
 	rm.mu.RLock()
-	conns := make([]*websocket.Conn, 0, len(rm.clients))
+	conns := make([]*websocket.Conn, 0, len(rm.clients)+len(rm.admins))
 	for _, c := range rm.clients {
+		conns = append(conns, c.conn)
+	}
+	for _, c := range rm.admins {
 		conns = append(conns, c.conn)
 	}
 	rm.mu.RUnlock()
@@ -554,6 +714,15 @@ func (h *Hub) Broadcast(gameID uuid.UUID, msgType string, payload any) {
 	}
 
 	h.broadcastToRoom(rm, msgType, payload)
+}
+
+// BroadcastToAdmins sends payload only to gameID's connected admin
+// connections (not to players), creating the room if this is the first
+// thing ever broadcast for this game. Exported for REST admin handlers to
+// call after mutating state that only the admin view cares about (e.g. a
+// free-text answer being submitted or graded).
+func (h *Hub) BroadcastToAdmins(gameID uuid.UUID, msgType string, payload any) {
+	h.broadcastToAdmins(h.roomFor(gameID), msgType, payload)
 }
 
 // BroadcastQuestionStarted sends question.started to every client
@@ -599,6 +768,10 @@ func (h *Hub) BroadcastQuestionStarted(ctx context.Context, gameID uuid.UUID, ba
 		}
 		h.sendTo(c, TypeQuestionStarted, payload)
 	}
+
+	// Admins have no "your answer" of their own to personalize — they get
+	// the plain base payload, same as broadcastToRoom would send.
+	h.broadcastToAdmins(rm, TypeQuestionStarted, base)
 }
 
 // applyYourAnswer folds a player's existing answer (if any) into their

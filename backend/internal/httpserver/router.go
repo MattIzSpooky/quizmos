@@ -87,6 +87,7 @@ func New(opts Options) (http.Handler, error) {
 	})
 
 	r.With(middleware.ClientID).Get("/ws/games/{code}", opts.Hub.Upgrade)
+	r.Get("/ws/admin/games/{gameId}", opts.Hub.UpgradeAdmin)
 
 	// Liveness/readiness for Kubernetes (or any load balancer health
 	// check). healthz only confirms the process is up and serving —

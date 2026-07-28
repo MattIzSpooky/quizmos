@@ -66,6 +66,11 @@ func (h *Handlers) GradeAnswer(ctx context.Context, req api.GradeAnswerRequestOb
 	}
 	for _, a := range answers {
 		if a.ClientID == graded.ClientID {
+			// Keeps a second open admin tab's free-text list in sync —
+			// the grading admin's own tab already has the fresh value
+			// from this response, but nothing else pushes it to anyone
+			// else watching the same game.
+			h.hub.BroadcastToAdmins(req.GameId, ws.TypeFreeTextAnswerUpdated, freeTextAnswerToWsEvent(a, graded.QuestionID))
 			return api.GradeAnswer200JSONResponse(freeTextAnswerToAPI(a)), nil
 		}
 	}

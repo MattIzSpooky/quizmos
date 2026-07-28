@@ -80,6 +80,55 @@ func TestGameDetailToAPI_MarksConnectedPlayers(t *testing.T) {
 	}
 }
 
+func TestFreeTextAnswerToWsEvent_UngradedHasNoVerdict(t *testing.T) {
+	questionID := uuid.New()
+	clientID := uuid.New()
+	answerID := uuid.New()
+
+	got := freeTextAnswerToWsEvent(game.FreeTextAnswer{
+		ID:       answerID,
+		ClientID: clientID,
+		Nickname: "Alice",
+		Text:     "Paris",
+		Graded:   false,
+	}, questionID)
+
+	if got.QuestionID != questionID.String() || got.ID != answerID.String() || got.ClientID != clientID.String() {
+		t.Errorf("ids not carried through: %+v", got)
+	}
+	if got.Nickname != "Alice" || got.Text != "Paris" {
+		t.Errorf("Nickname/Text = %q/%q, want Alice/Paris", got.Nickname, got.Text)
+	}
+	if got.Graded {
+		t.Error("expected Graded = false")
+	}
+	if got.Correct != nil || got.PointsAwarded != nil {
+		t.Errorf("expected no verdict while ungraded, got Correct=%v PointsAwarded=%v", got.Correct, got.PointsAwarded)
+	}
+}
+
+func TestFreeTextAnswerToWsEvent_GradedIncludesVerdict(t *testing.T) {
+	got := freeTextAnswerToWsEvent(game.FreeTextAnswer{
+		ID:            uuid.New(),
+		ClientID:      uuid.New(),
+		Nickname:      "Alice",
+		Text:          "Paris",
+		Graded:        true,
+		Correct:       true,
+		PointsAwarded: 100,
+	}, uuid.New())
+
+	if !got.Graded {
+		t.Error("expected Graded = true")
+	}
+	if got.Correct == nil || !*got.Correct {
+		t.Errorf("Correct = %v, want pointer to true", got.Correct)
+	}
+	if got.PointsAwarded == nil || *got.PointsAwarded != 100 {
+		t.Errorf("PointsAwarded = %v, want pointer to 100", got.PointsAwarded)
+	}
+}
+
 func TestLeaderboardToAPI_PreservesRankOrder(t *testing.T) {
 	entries := []game.LeaderboardEntry{
 		{ClientID: uuid.New(), Nickname: "Alice", Score: 200, Rank: 1},

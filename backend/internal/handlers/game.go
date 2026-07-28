@@ -67,6 +67,16 @@ func (h *Handlers) GetGame(ctx context.Context, req api.GetGameRequestObject) (a
 	return api.GetGame200JSONResponse(gameDetailToAPI(detail, connected)), nil
 }
 
+func (h *Handlers) CreateGameWsTicket(ctx context.Context, req api.CreateGameWsTicketRequestObject) (api.CreateGameWsTicketResponseObject, error) {
+	if _, err := h.games.GetDetail(ctx, req.GameId); err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			return api.CreateGameWsTicket404JSONResponse{NotFoundJSONResponse: notFoundGame()}, nil
+		}
+		return nil, err
+	}
+	return api.CreateGameWsTicket200JSONResponse{Ticket: h.hub.MintAdminTicket(req.GameId)}, nil
+}
+
 func (h *Handlers) StartGame(ctx context.Context, req api.StartGameRequestObject) (api.StartGameResponseObject, error) {
 	g, err := h.games.Start(ctx, req.GameId)
 	if err != nil {

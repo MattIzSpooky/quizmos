@@ -13,6 +13,9 @@
 //    errorPayload, err := UnmarshalErrorPayload(bytes)
 //    bytes, err = errorPayload.Marshal()
 //
+//    freeTextAnswerUpdated, err := UnmarshalFreeTextAnswerUpdated(bytes)
+//    bytes, err = freeTextAnswerUpdated.Marshal()
+//
 //    gameEnded, err := UnmarshalGameEnded(bytes)
 //    bytes, err = gameEnded.Marshal()
 //
@@ -98,6 +101,16 @@ func UnmarshalErrorPayload(data []byte) (ErrorPayload, error) {
 }
 
 func (r *ErrorPayload) Marshal() ([]byte, error) {
+	return json.Marshal(r)
+}
+
+func UnmarshalFreeTextAnswerUpdated(data []byte) (FreeTextAnswerUpdated, error) {
+	var r FreeTextAnswerUpdated
+	err := json.Unmarshal(data, &r)
+	return r, err
+}
+
+func (r *FreeTextAnswerUpdated) Marshal() ([]byte, error) {
 	return json.Marshal(r)
 }
 
@@ -264,6 +277,22 @@ type AnswerSubmit struct {
 type ErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// Admin-only — never sent to players. Broadcast when a free_text answer is submitted
+// (graded false) and again whenever the admin grades it (graded true, correct/pointsAwarded
+// meaningful), so a second open admin tab stays in sync without polling.
+type FreeTextAnswerUpdated struct {
+	ClientID                               string `json:"clientId"`
+	// Only meaningful once graded is true.       
+	Correct                                *bool  `json:"correct,omitempty"`
+	Graded                                 bool   `json:"graded"`
+	ID                                     string `json:"id"`
+	Nickname                               string `json:"nickname"`
+	// Only meaningful once graded is true.       
+	PointsAwarded                          *int64 `json:"pointsAwarded,omitempty"`
+	QuestionID                             string `json:"questionId"`
+	Text                                   string `json:"text"`
 }
 
 type GameEnded struct {

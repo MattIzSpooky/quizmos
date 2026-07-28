@@ -15,6 +15,7 @@ import type {
   GameEnded,
   ErrorPayload,
   AnswerSubmit,
+  FreeTextAnswerUpdated,
 } from "./types.gen";
 
 export type ServerMessage =
@@ -29,7 +30,9 @@ export type ServerMessage =
   | { type: "answer.result"; payload: AnswerResult }
   | { type: "leaderboard.updated"; payload: LeaderboardUpdated }
   | { type: "game.ended"; payload: GameEnded }
-  | { type: "error"; payload: ErrorPayload };
+  | { type: "error"; payload: ErrorPayload }
+  // Admin-only — never sent on the player channel.
+  | { type: "freeTextAnswer.updated"; payload: FreeTextAnswerUpdated };
 
 export type ClientMessage = { type: "answer.submit"; payload: AnswerSubmit };
 

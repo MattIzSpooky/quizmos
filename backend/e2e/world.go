@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -195,6 +196,22 @@ type World struct {
 
 	players map[string]*player // nickname -> player
 
+	// adminConn is the admin live-control page's own websocket connection,
+	// if the scenario has connected one — reuses the player type purely
+	// as a message log/waitFor helper (see connectAdminSocket); an admin
+	// connection has no client_id or nickname of its own, but nothing in
+	// player's log/wait machinery actually depends on either.
+	adminConn *player
+	// secondAdminConn is a second, independent admin connection to the
+	// same game — for scenarios proving that a second open admin tab
+	// stays in sync (e.g. free-text grading), not just the one that
+	// happened to trigger the mutation.
+	secondAdminConn *player
+	// lastWSTicket is the most recently minted admin websocket ticket, for
+	// scenarios that mint one and then use (or reuse) it explicitly rather
+	// than connecting immediately (see mintAdminWsTicket).
+	lastWSTicket string
+
 	// lastMediaURL is the public URL of the most recently uploaded
 	// question media, kept around so a later step can confirm it's been
 	// deleted from storage (e.g. after the owning quiz is deleted) —
@@ -231,14 +248,24 @@ func (w *World) connectPlayerSocket(ctx context.Context, p *player) error {
 		return fmt.Errorf("dial websocket: %w", err)
 	}
 	p.conn = conn
-	p.closed = make(chan struct{})
+	startRecording(p)
+	return nil
+}
 
+// startRecording starts p's read loop against its already-established
+// p.conn, closing p.closed once the loop returns (the connection ended,
+// whichever side closed it) — shared by every kind of websocket
+// connection a scenario opens (a real player or an admin's game-control
+// connection), since the log/wait machinery in *player is identical
+// either way.
+func startRecording(p *player) {
+	p.closed = make(chan struct{})
 	go func() {
 		defer close(p.closed)
 		for {
 			var env wsEnvelope
 			readCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			err := wsjson.Read(readCtx, conn, &env)
+			err := wsjson.Read(readCtx, p.conn, &env)
 			cancel()
 			if err != nil {
 				return
@@ -246,7 +273,6 @@ func (w *World) connectPlayerSocket(ctx context.Context, p *player) error {
 			p.recordMessage(env)
 		}
 	}()
-	return nil
 }
 
 // dialGameWebsocket attempts the websocket handshake for gameCode/clientID
@@ -270,4 +296,90 @@ func (w *World) closeAllSockets() {
 			_ = p.conn.CloseNow()
 		}
 	}
+	if w.adminConn != nil && w.adminConn.conn != nil {
+		_ = w.adminConn.conn.CloseNow()
+	}
+	if w.secondAdminConn != nil && w.secondAdminConn.conn != nil {
+		_ = w.secondAdminConn.conn.CloseNow()
+	}
+}
+
+// mintAdminWsTicket calls POST /admin/games/{gameId}/ws-ticket with the
+// scenario's admin token — the same request the real admin frontend makes
+// right before opening the game-control websocket.
+func (w *World) mintAdminWsTicket(ctx context.Context, gameID string) (string, error) {
+	path := fmt.Sprintf("/admin/games/%s/ws-ticket", gameID)
+	resp, err := w.adminRequest(ctx, http.MethodPost, path, nil)
+	if err != nil {
+		return "", err
+	}
+	if resp.Status != http.StatusOK {
+		return "", fmt.Errorf("expected 200 minting an admin ws ticket, got %d: %v", resp.Status, resp.Body)
+	}
+	ticket, _ := resp.Body["ticket"].(string)
+	if ticket == "" {
+		return "", fmt.Errorf("ws-ticket response missing a ticket: %v", resp.Body)
+	}
+	return ticket, nil
+}
+
+// connectAdminSocket mints a fresh ticket and connects the admin
+// game-control websocket with it, recording the result on w.adminConn.
+func (w *World) connectAdminSocket(ctx context.Context) error {
+	ticket, err := w.mintAdminWsTicket(ctx, w.gameID)
+	if err != nil {
+		return err
+	}
+	return w.connectAdminSocketWithTicket(ctx, ticket)
+}
+
+func (w *World) connectAdminSocketWithTicket(ctx context.Context, ticket string) error {
+	conn, _, err := dialAdminWebsocket(ctx, w, w.gameID, ticket)
+	if err != nil {
+		return fmt.Errorf("dial admin websocket: %w", err)
+	}
+	w.adminConn = newConnectedAdminPlayer(conn)
+	return nil
+}
+
+// connectSecondAdminSocket mints its own fresh ticket, independent of
+// w.adminConn's, and connects a second admin game-control websocket —
+// for scenarios proving a second open admin tab stays in sync too, not
+// just the one that happened to trigger a mutation.
+func (w *World) connectSecondAdminSocket(ctx context.Context) error {
+	ticket, err := w.mintAdminWsTicket(ctx, w.gameID)
+	if err != nil {
+		return err
+	}
+	conn, _, err := dialAdminWebsocket(ctx, w, w.gameID, ticket)
+	if err != nil {
+		return fmt.Errorf("dial second admin websocket: %w", err)
+	}
+	w.secondAdminConn = newConnectedAdminPlayer(conn)
+	return nil
+}
+
+// newConnectedAdminPlayer wraps an already-established admin websocket
+// connection in a *player (used purely as a message log/waitFor helper —
+// see the World.adminConn field doc) and starts recording its messages.
+func newConnectedAdminPlayer(conn *websocket.Conn) *player {
+	p := newPlayer("admin", "")
+	p.conn = conn
+	startRecording(p)
+	return p
+}
+
+// dialAdminWebsocket attempts the admin game-control websocket handshake
+// for gameID/ticket without registering a connection — for asserting
+// UpgradeAdmin's rejection paths (missing/invalid/already-used ticket),
+// where a successful dial would be the test failure. status is the HTTP
+// status the server responded with when the handshake didn't succeed (0
+// if no response was received at all).
+func dialAdminWebsocket(ctx context.Context, w *World, gameID, ticket string) (conn *websocket.Conn, status int, err error) {
+	url := fmt.Sprintf("%s/admin/games/%s?ticket=%s", w.env.wsBaseURL, gameID, ticket)
+	conn, resp, err := websocket.Dial(ctx, url, nil)
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	return conn, status, err
 }

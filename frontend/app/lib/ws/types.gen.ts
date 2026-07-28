@@ -1,11 +1,12 @@
 // To parse this data:
 //
-//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionAnswersReset, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted, YourAnswer } from "./file";
+//   import { Convert, AnswerCount, AnswerResult, AnswerSubmit, ErrorPayload, FreeTextAnswerUpdated, GameEnded, GameStarted, LeaderboardEntry, LeaderboardUpdated, PlayerKicked, PlayerSummary, PresencePlayerJoined, PresencePlayerLeft, QuestionAnswersReset, QuestionEnded, QuestionOption, QuestionReviewed, QuestionStarted, YourAnswer } from "./file";
 //
 //   const answerCount = Convert.toAnswerCount(json);
 //   const answerResult = Convert.toAnswerResult(json);
 //   const answerSubmit = Convert.toAnswerSubmit(json);
 //   const errorPayload = Convert.toErrorPayload(json);
+//   const freeTextAnswerUpdated = Convert.toFreeTextAnswerUpdated(json);
 //   const gameEnded = Convert.toGameEnded(json);
 //   const gameStarted = Convert.toGameStarted(json);
 //   const leaderboardEntry = Convert.toLeaderboardEntry(json);
@@ -53,6 +54,29 @@ export interface AnswerSubmit {
 export interface ErrorPayload {
     code:    string;
     message: string;
+    [property: string]: any;
+}
+
+/**
+ * Admin-only — never sent to players. Broadcast when a free_text answer is submitted
+ * (graded false) and again whenever the admin grades it (graded true, correct/pointsAwarded
+ * meaningful), so a second open admin tab stays in sync without polling.
+ */
+export interface FreeTextAnswerUpdated {
+    clientId: string;
+    /**
+     * Only meaningful once graded is true.
+     */
+    correct?: boolean;
+    graded:   boolean;
+    id:       string;
+    nickname: string;
+    /**
+     * Only meaningful once graded is true.
+     */
+    pointsAwarded?: number;
+    questionId:     string;
+    text:           string;
     [property: string]: any;
 }
 
@@ -289,6 +313,14 @@ export class Convert {
 
     public static errorPayloadToJson(value: ErrorPayload): string {
         return JSON.stringify(uncast(value, r("ErrorPayload")), null, 2);
+    }
+
+    public static toFreeTextAnswerUpdated(json: string): FreeTextAnswerUpdated {
+        return cast(JSON.parse(json), r("FreeTextAnswerUpdated"));
+    }
+
+    public static freeTextAnswerUpdatedToJson(value: FreeTextAnswerUpdated): string {
+        return JSON.stringify(uncast(value, r("FreeTextAnswerUpdated")), null, 2);
     }
 
     public static toGameEnded(json: string): GameEnded {
@@ -572,6 +604,16 @@ const typeMap: any = {
     "ErrorPayload": o([
         { json: "code", js: "code", typ: "" },
         { json: "message", js: "message", typ: "" },
+    ], "any"),
+    "FreeTextAnswerUpdated": o([
+        { json: "clientId", js: "clientId", typ: "" },
+        { json: "correct", js: "correct", typ: u(undefined, true) },
+        { json: "graded", js: "graded", typ: true },
+        { json: "id", js: "id", typ: "" },
+        { json: "nickname", js: "nickname", typ: "" },
+        { json: "pointsAwarded", js: "pointsAwarded", typ: u(undefined, 0) },
+        { json: "questionId", js: "questionId", typ: "" },
+        { json: "text", js: "text", typ: "" },
     ], "any"),
     "GameEnded": o([
         { json: "endedAt", js: "endedAt", typ: Date },

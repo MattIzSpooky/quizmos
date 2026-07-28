@@ -279,6 +279,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/games/{gameId}/ws-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mint a short-lived, single-use ticket for connecting to the admin live-updates websocket (GET /ws/admin/games/{gameId}?ticket=...). A ticket exists because browsers can't attach the Authorization header to a websocket handshake — this keeps the actual bearer token out of the connection URL (and therefore out of logs/traces) while still gating the socket on the caller having a valid admin session right now. */
+        post: operations["createGameWsTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/games/{gameId}/questions/{questionId}/answers": {
         parameters: {
             query?: never;
@@ -484,6 +503,10 @@ export interface components {
         ResetAnswersRequest: {
             /** @description Must be at or before the game's current question index. */
             questionIndex: number;
+        };
+        GameWsTicket: {
+            /** @description Single-use, short-lived (~30s) opaque token. Pass it as ?ticket=... on GET /ws/admin/games/{gameId}; it's consumed on first use and expires quickly otherwise, so mint a fresh one per connection attempt rather than caching it. */
+            ticket: string;
         };
         FreeTextAnswer: {
             /** Format: uuid */
@@ -1219,6 +1242,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Leaderboard"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createGameWsTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gameId: components["parameters"]["GameId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ticket minted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameWsTicket"];
                 };
             };
             401: components["responses"]["Unauthorized"];

@@ -3,8 +3,16 @@ info:
   title: Quizmos Websocket API
   version: 0.1.0
   description: >
-    Live gameplay channel. Connect to /ws/games/{code}?client_id={uuid} after
-    joining via POST /api/games/join. Only the message payload schemas under
+    Two channels: gameSession (players) and adminSession (the admin live
+    game-control page). Connect to gameSession at
+    /ws/games/{code}?client_id={uuid} after joining via POST
+    /api/games/join. Connect to adminSession at
+    /ws/admin/games/{gameId}?ticket={ticket} using a single-use ticket
+    minted by POST /admin/games/{gameId}/ws-ticket — browsers can't attach
+    the Authorization header to a websocket handshake, so a ticket stands
+    in for the bearer token without ever putting it in a URL. Every
+    gameSession broadcast also reaches connected admins; adminSession's own
+    messages (below) are admin-only. Only the message payload schemas under
     components.schemas are used for code generation (via quicktype); the
     {type, payload} envelope itself is hand-written on both client and server.
 
@@ -43,6 +51,15 @@ channels:
         $ref: "#/components/messages/errorMessage"
       answerSubmit:
         $ref: "#/components/messages/answerSubmit"
+
+  adminSession:
+    address: /ws/admin/games/{gameId}
+    parameters:
+      gameId:
+        description: Game ID
+    messages:
+      freeTextAnswerUpdated:
+        $ref: "#/components/messages/freeTextAnswerUpdated"
 
 operations:
   receivePresencePlayerJoined:
@@ -123,6 +140,12 @@ operations:
       $ref: "#/channels/gameSession"
     messages:
       - $ref: "#/channels/gameSession/messages/answerSubmit"
+  receiveFreeTextAnswerUpdated:
+    action: receive
+    channel:
+      $ref: "#/channels/adminSession"
+    messages:
+      - $ref: "#/channels/adminSession/messages/freeTextAnswerUpdated"
 
 components:
   messages:
@@ -178,6 +201,10 @@ components:
       name: answer.submit
       payload:
         $ref: "#/components/schemas/AnswerSubmit"
+    freeTextAnswerUpdated:
+      name: freeTextAnswer.updated
+      payload:
+        $ref: "#/components/schemas/FreeTextAnswerUpdated"
 
   schemas:
     PlayerSummary:
@@ -463,3 +490,31 @@ components:
         text:
           type: string
           maxLength: 500
+
+    FreeTextAnswerUpdated:
+      type: object
+      required: [questionId, id, clientId, nickname, text, graded]
+      description: >
+        Admin-only — never sent to players. Broadcast when a free_text
+        answer is submitted (graded false) and again whenever the admin
+        grades it (graded true, correct/pointsAwarded meaningful), so a
+        second open admin tab stays in sync without polling.
+      properties:
+        questionId:
+          type: string
+        id:
+          type: string
+        clientId:
+          type: string
+        nickname:
+          type: string
+        text:
+          type: string
+        graded:
+          type: boolean
+        correct:
+          type: boolean
+          description: Only meaningful once graded is true.
+        pointsAwarded:
+          type: integer
+          description: Only meaningful once graded is true.
