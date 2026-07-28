@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,20 +14,23 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// NewStdoutHandler builds the trace-correlated stdout handler Setup
-// installs — exported so callers that don't go through Setup at all
-// (namely the e2e suite, which builds its own in-process server without
-// telemetry) can still get the same formatting instead of falling back to
-// slog's bare, unconfigured default. format is "json" (one JSON object
-// per line — what production and the OTLP/Loki export both use) or
-// "text" (slog's human-readable key=value format); anything else falls
-// back to "json".
-func NewStdoutHandler(format string) slog.Handler {
+// NewStdoutHandler builds the trace-correlated log handler Setup installs
+// — exported so callers that don't go through Setup at all (namely the
+// e2e suite, which builds its own in-process server without telemetry)
+// can still get the same formatting instead of falling back to slog's
+// bare, unconfigured default. format is "json" (one JSON object per
+// line — what production and the OTLP/Loki export both use) or "text"
+// (slog's human-readable key=value format); anything else falls back to
+// "json". Despite the name, it writes to w, not necessarily os.Stdout —
+// e.g. the e2e suite points it at io.Discard by default so application
+// logs don't drown out godog's own scenario output, only wiring up
+// os.Stdout when E2E_LOG asks for it.
+func NewStdoutHandler(format string, w io.Writer) slog.Handler {
 	var h slog.Handler
 	if format == "text" {
-		h = slog.NewTextHandler(os.Stdout, nil)
+		h = slog.NewTextHandler(w, nil)
 	} else {
-		h = slog.NewJSONHandler(os.Stdout, nil)
+		h = slog.NewJSONHandler(w, nil)
 	}
 	return traceEnrichedHandler{h}
 }

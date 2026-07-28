@@ -9,10 +9,12 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -76,8 +78,15 @@ func startEnvironment(ctx context.Context) (*environment, error) {
 	// to export to here), so without this slog.Default() would stay on
 	// its bare built-in fallback — the old-style "2026/07/27 19:59:23
 	// INFO msg key=value" format — instead of matching what the real
-	// server actually logs.
-	slog.SetDefault(slog.New(telemetry.NewStdoutHandler("json")))
+	// server actually logs. It's discarded by default rather than written
+	// to stdout: every request the server handles logs at least one line,
+	// which would otherwise bury godog's own --format=pretty scenario
+	// output. Set E2E_LOG=1 to see it (e.g. while debugging a failure).
+	logOutput := io.Discard
+	if os.Getenv("E2E_LOG") != "" {
+		logOutput = os.Stdout
+	}
+	slog.SetDefault(slog.New(telemetry.NewStdoutHandler("json", logOutput)))
 
 	root := repoRoot()
 	migrationsDir := filepath.Join(root, "backend", "internal", "db", "migrations")

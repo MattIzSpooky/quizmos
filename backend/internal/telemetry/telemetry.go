@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
@@ -79,7 +80,7 @@ func Setup(ctx context.Context, cfg config.Config) (func(context.Context) error,
 		sdklog.WithResource(res),
 	)
 
-	stdout := NewStdoutHandler(cfg.LogFormat)
+	stdout := NewStdoutHandler(cfg.LogFormat, os.Stdout)
 	otelHandler := traceEnrichedHandler{newOTLPJSONHandler(loggerProvider.Logger(serviceName))}
 	slog.SetDefault(slog.New(fanoutHandler{stdout, otelHandler}))
 
