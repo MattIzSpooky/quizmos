@@ -88,10 +88,16 @@ type Keycloak struct {
 	keys jwk.Set
 }
 
-func NewKeycloak(issuer, adminRole string) *Keycloak {
+// NewKeycloak validates tokens whose iss claim must equal issuer, fetching
+// the JWKS from jwksIssuer instead — a separate, network-reachable base URL
+// for cases where issuer is a browser-facing address (e.g. "localhost")
+// that isn't necessarily reachable, or reachable the same way, from where
+// this process runs. Pass the same value for both when issuer is already
+// reachable as-is.
+func NewKeycloak(issuer, jwksIssuer, adminRole string) *Keycloak {
 	return &Keycloak{
 		issuer:    strings.TrimSuffix(issuer, "/"),
-		jwksURL:   strings.TrimSuffix(issuer, "/") + "/protocol/openid-connect/certs",
+		jwksURL:   strings.TrimSuffix(jwksIssuer, "/") + "/protocol/openid-connect/certs",
 		adminRole: adminRole,
 	}
 }

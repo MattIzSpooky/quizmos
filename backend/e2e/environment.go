@@ -162,7 +162,7 @@ func startEnvironment(ctx context.Context) (*environment, error) {
 	keycloakBase := fmt.Sprintf("http://%s:%s", kcHost, kcPort.Port())
 	issuer := keycloakBase + "/realms/quizmos"
 
-	kcAuth := auth.NewKeycloak(issuer, e2eAdminRole)
+	kcAuth := auth.NewKeycloak(issuer, issuer, e2eAdminRole)
 	if err := kcAuth.StartRefresh(ctx, time.Minute); err != nil {
 		return nil, fmt.Errorf("fetch JWKS from test keycloak: %w", err)
 	}

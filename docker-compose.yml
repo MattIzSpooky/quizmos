@@ -123,9 +123,15 @@ services:
       LOG_FORMAT: ${LOG_FORMAT:-json}
       # Must be the exact string the browser uses to reach Keycloak (see
       # frontend's VITE_KEYCLOAK_ISSUER default) — the backend checks the
-      # JWT's `iss` claim against this literally, and derives its JWKS URL
-      # by appending a fixed suffix to it, so the two can't diverge.
+      # JWT's `iss` claim against this literally.
       KEYCLOAK_ISSUER: http://localhost:8081/realms/quizmos
+      # Where the backend itself fetches the JWKS from — the internal
+      # docker network address. Kept separate from KEYCLOAK_ISSUER above
+      # because "localhost" inside this container doesn't reliably mean
+      # "the host" across engines (works via Docker Desktop's DNS trick,
+      # unreliable under Podman), whereas the "keycloak" service name
+      # always resolves on the compose network regardless of engine.
+      KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/quizmos
       ADMIN_ROLE: quiz-admin
       FRONTEND_ORIGIN: http://localhost:5173
       # S3_ENDPOINT is where the backend itself uploads question media —
@@ -139,14 +145,6 @@ services:
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: quizmos-media
       S3_PUBLIC_URL: http://localhost:9000
-    # "localhost" inside this container normally means itself, not the
-    # host — but KEYCLOAK_ISSUER above has to say "localhost:8081" to
-    # match what the browser sees. Redirecting it to the host gateway lets
-    # the backend reach the keycloak container through the same
-    # host-published port (8081) the browser uses, so both sides agree on
-    # one issuer string without any extra backend configuration.
-    extra_hosts:
-      - "localhost:host-gateway"
     ports:
       - "8080:8080"
     restart: on-failure

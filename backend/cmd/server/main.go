@@ -68,7 +68,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	keycloak := auth.NewKeycloak(cfg.KeycloakIssuer, cfg.AdminRole)
+	keycloak := auth.NewKeycloak(cfg.KeycloakIssuer, cfg.KeycloakInternalIssuer, cfg.AdminRole)
 	if err := keycloak.StartRefresh(ctx, 10*time.Minute); err != nil {
 		slog.Error("keycloak JWKS", "error", err)
 		os.Exit(1)

@@ -113,7 +113,7 @@ func (f *fakeJWKS) mintWithUsername(t *testing.T, username string, roles []strin
 
 func newTestKeycloak(t *testing.T, issuer string) *Keycloak {
 	t.Helper()
-	kc := NewKeycloak(issuer, "quiz-admin")
+	kc := NewKeycloak(issuer, issuer, "quiz-admin")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := kc.StartRefresh(ctx, time.Hour); err != nil {
@@ -210,7 +210,7 @@ func TestVerify_WrongIssuerRejected(t *testing.T) {
 	// Configure the Keycloak client with a *different* issuer than the
 	// one embedded in minted tokens, simulating a token from another
 	// realm/environment.
-	kc := NewKeycloak(jwks.issuer, "quiz-admin")
+	kc := NewKeycloak(jwks.issuer, jwks.issuer, "quiz-admin")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := kc.StartRefresh(ctx, time.Hour); err != nil {

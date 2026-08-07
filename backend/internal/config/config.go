@@ -10,8 +10,16 @@ type Config struct {
 	Addr           string
 	DatabaseURL    string
 	KeycloakIssuer string
-	AdminRole      string
-	AllowedOrigins []string
+	// KeycloakInternalIssuer is where this process itself fetches the JWKS
+	// from — unlike KeycloakIssuer (which must match the browser-facing
+	// address literally, since it's compared against the token's iss
+	// claim), this one only needs to be network-reachable from here. They
+	// default to the same value; compose environments override this one to
+	// the internal service address, since "localhost" inside a container
+	// doesn't reliably reach the host across engines (notably Podman).
+	KeycloakInternalIssuer string
+	AdminRole              string
+	AllowedOrigins         []string
 
 	// S3* configures the MinIO/S3-compatible bucket question media
 	// (images, audio) is stored in. S3Endpoint is where the backend
@@ -42,12 +50,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("S3_USE_SSL: %w", err)
 	}
+	keycloakIssuer := getEnv("KEYCLOAK_ISSUER", "http://localhost:8081/realms/quizmos")
 	cfg := Config{
-		Addr:           getEnv("ADDR", ":8080"),
-		DatabaseURL:    getEnv("DATABASE_URL", ""),
-		KeycloakIssuer: getEnv("KEYCLOAK_ISSUER", "http://localhost:8081/realms/quizmos"),
-		AdminRole:      getEnv("ADMIN_ROLE", "quiz-admin"),
-		AllowedOrigins: []string{getEnv("FRONTEND_ORIGIN", "http://localhost:5173")},
+		Addr:                   getEnv("ADDR", ":8080"),
+		DatabaseURL:            getEnv("DATABASE_URL", ""),
+		KeycloakIssuer:         keycloakIssuer,
+		KeycloakInternalIssuer: getEnv("KEYCLOAK_INTERNAL_ISSUER", keycloakIssuer),
+		AdminRole:              getEnv("ADMIN_ROLE", "quiz-admin"),
+		AllowedOrigins:         []string{getEnv("FRONTEND_ORIGIN", "http://localhost:5173")},
 		S3Endpoint:     getEnv("S3_ENDPOINT", "localhost:9000"),
 		S3AccessKey:    getEnv("S3_ACCESS_KEY", "minioadmin"),
 		S3SecretKey:    getEnv("S3_SECRET_KEY", "minioadmin"),
